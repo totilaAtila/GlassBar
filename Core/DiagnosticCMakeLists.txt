@@ -1,0 +1,19 @@
+cmake_minimum_required(VERSION 3.20)
+project(WindowDiagnostic)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_executable(WindowDiagnostic WindowDiagnostic.cpp)
+
+target_link_libraries(WindowDiagnostic
+    user32.lib
+    psapi.lib
+)
+
+if(MSVC)
+    target_compile_definitions(WindowDiagnostic PRIVATE
+        UNICODE
+        _UNICODE
+    )
+endif()

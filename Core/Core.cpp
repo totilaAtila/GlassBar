@@ -3,272 +3,297 @@
 
 namespace CrystalFrame {
 
-CrystalFrameCore::CrystalFrameCore(HINSTANCE hInstance)
-    : m_hInstance(hInstance) {
+// Transparency refresh interval
+constexpr UINT REFRESH_INTERVAL_MS = 100;
+
+Core::Core() {
 }
 
-CrystalFrameCore::~CrystalFrameCore() {
+Core::~Core() {
     Shutdown();
 }
 
-bool CrystalFrameCore::Initialize() {
+bool Core::Initialize() {
     CF_LOG(Info, "=== CrystalFrame Core Initialization ===");
-    
+
     // Create modules
     m_config = std::make_unique<ConfigManager>();
     m_locator = std::make_unique<ShellTargetLocator>();
-    m_overlayHost = std::make_unique<OverlayHost>();
     m_renderer = std::make_unique<Renderer>();
-    m_ipc = std::make_unique<IpcBridge>();
-    
+
     // Initialize config
     if (!m_config->Initialize()) {
         CF_LOG(Error, "ConfigManager initialization failed");
         return false;
     }
-    
+
     Config config = m_config->GetConfig();
-    CF_LOG(Info, "Config loaded: Taskbar=" << config.taskbarOpacity 
+    CF_LOG(Info, "Config loaded: Taskbar=" << config.taskbarOpacity
                  << "%, Start=" << config.startOpacity << "%");
-    
-    // Initialize overlay host
-    if (!m_overlayHost->Initialize(m_hInstance)) {
-        CF_LOG(Error, "OverlayHost initialization failed");
-        return false;
-    }
-    
-    // Initialize renderer
-    if (!m_renderer->Initialize(
-            m_overlayHost->GetTaskbarOverlayWindow(),
-            m_overlayHost->GetStartOverlayWindow())) {
+
+    // Store config values
+    m_taskbarOpacity = config.taskbarOpacity;
+    m_startOpacity = config.startOpacity;
+    m_taskbarEnabled = config.taskbarEnabled;
+    m_startEnabled = config.startEnabled;
+
+    // Initialize renderer (loads SetWindowCompositionAttribute)
+    if (!m_renderer->Initialize()) {
         CF_LOG(Error, "Renderer initialization failed");
         return false;
     }
-    
+
     // Apply config to renderer
-    m_renderer->SetTaskbarOpacity(config.taskbarOpacity / 100.0f);
-    m_renderer->SetStartOpacity(config.startOpacity / 100.0f);
-    m_renderer->SetTaskbarEnabled(config.taskbarEnabled);
-    m_renderer->SetStartEnabled(config.startEnabled);
-    
-    // Initialize shell target locator
+    m_renderer->SetTaskbarOpacity(m_taskbarOpacity);
+    m_renderer->SetStartOpacity(m_startOpacity);
+    m_renderer->SetTaskbarEnabled(m_taskbarEnabled);
+    m_renderer->SetStartEnabled(m_startEnabled);
+
+    // Initialize shell target locator (finds taskbar/start windows)
     if (!m_locator->Initialize(this)) {
         CF_LOG(Error, "ShellTargetLocator initialization failed");
         return false;
     }
-    
-    // Initialize IPC
-    if (!m_ipc->Initialize(this)) {
-        CF_LOG(Error, "IpcBridge initialization failed");
+
+    // Initialize Start Menu Hook (intercepts Windows key and Start button clicks)
+    m_startMenuHook = std::make_unique<StartMenuHook>();
+    if (!m_startMenuHook->Initialize()) {
+        CF_LOG(Error, "StartMenuHook initialization failed");
         return false;
     }
-    
-    // Send initial status
-    m_ipc->SendStatusUpdate(GetCurrentStatus());
-    
+
+    // Set callbacks for Start Menu hook
+    m_startMenuHook->SetShowMenuCallback([this](int x, int y) {
+        OnCustomStartMenuRequested(x, y);
+    });
+
+    m_startMenuHook->SetHideMenuCallback([this]() {
+        if (m_startMenuWindow) {
+            m_startMenuWindow->Hide();
+        }
+    });
+
+    m_startMenuHook->SetIsMenuVisibleCallback([this]() -> bool {
+        return m_startMenuWindow && m_startMenuWindow->IsVisible();
+    });
+
+    m_startMenuHook->SetGetMenuBoundsCallback([this]() -> RECT {
+        if (m_startMenuWindow) {
+            return m_startMenuWindow->GetWindowBounds();
+        }
+        return RECT{};
+    });
+
+    // Disabled by default - Dashboard will enable when configured
+    m_startMenuHook->SetEnabled(false);
+
+    // Initialize custom Start Menu window
+    m_startMenuWindow = std::make_unique<StartMenuWindow>();
+    if (!m_startMenuWindow->Initialize()) {
+        CF_LOG(Error, "StartMenuWindow initialization failed");
+        return false;
+    }
+
+    // Create refresh timer
+    UINT_PTR timerId = SetTimer(nullptr, 0, REFRESH_INTERVAL_MS, nullptr);
+    CF_LOG(Info, "Refresh timer created with ID: " << timerId);
+
     CF_LOG(Info, "=== CrystalFrame Core Ready ===");
-    
+
+    m_running = true;
     return true;
 }
 
-void CrystalFrameCore::Run() {
-    m_running = true;
-    
-    CF_LOG(Info, "Entering message loop");
-    
+bool Core::ProcessMessages() {
+    if (!m_running) {
+        return false;
+    }
+
     MSG msg = {};
-    while (m_running && GetMessage(&msg, nullptr, 0, 0)) {
-        // Handle deferred DirectComposition commits inline
-        if (msg.message == WM_DCOMP_COMMIT && m_renderer) {
-            m_renderer->OnDeferredCommit();
-            continue;
+
+    // Process all available messages (non-blocking)
+    while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+            m_running = false;
+            return false;
         }
-        
+
+        if (msg.message == WM_TIMER) {
+            RefreshTransparency();
+        }
+
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
-    
-    CF_LOG(Info, "Exited message loop");
+
+    return true;
 }
 
-void CrystalFrameCore::Shutdown() {
-    CF_LOG(Info, "=== CrystalFrame Core Shutdown ===");
-    
+void Core::Shutdown() {
+    CF_LOG(Info, "Core shutdown initiated");
+
     m_running = false;
-    
-    // Shutdown in reverse order
-    m_ipc.reset();
-    m_renderer.reset();
-    m_locator.reset();
-    m_overlayHost.reset();
+
+    if (m_startMenuWindow) {
+        m_startMenuWindow->Shutdown();
+    }
+
+    if (m_startMenuHook) {
+        m_startMenuHook->Shutdown();
+    }
+
+    if (m_locator) {
+        m_locator->Shutdown();
+    }
+
+    if (m_renderer) {
+        m_renderer->Shutdown();
+    }
+
     m_config.reset();
+    m_locator.reset();
+    m_renderer.reset();
+    m_startMenuHook.reset();
+    m_startMenuWindow.reset();
+
+    CF_LOG(Info, "Core shutdown complete");
 }
 
-// ========== IShellTargetCallback Implementation ==========
+// IShellTargetCallback interface implementation
+void Core::OnTaskbarChanged(const TaskbarInfo& info) {
+    CF_LOG(Info, "Taskbar found - HWND: 0x" << std::hex << reinterpret_cast<uintptr_t>(info.hwnd) << std::dec);
 
-void CrystalFrameCore::OnTaskbarChanged(const TaskbarInfo& info) {
-    CF_LOG(Info, "Taskbar changed - updating overlay");
-    
-    if (m_overlayHost) {
-        m_overlayHost->UpdateTaskbarOverlay(info);
-    }
-    
-    // Send status update to Dashboard
-    if (m_ipc) {
-        m_ipc->SendStatusUpdate(GetCurrentStatus());
-    }
+    m_taskbarFound = true;
+    m_renderer->SetTaskbarWindow(info.hwnd);
 }
 
-void CrystalFrameCore::OnStartShown(const StartInfo& info) {
-    CF_LOG(Info, "Start menu shown");
-    
-    if (m_overlayHost) {
-        m_overlayHost->ShowStartOverlay(info);
-    }
-    
-    if (m_ipc) {
-        m_ipc->SendStatusUpdate(GetCurrentStatus());
-    }
+void Core::OnStartShown(const StartInfo& info) {
+    CF_LOG(Debug, "Start menu shown - HWND: 0x" << std::hex << reinterpret_cast<uintptr_t>(info.hwnd) << std::dec);
+
+    m_startDetected = true;
+    m_renderer->SetStartWindow(info.hwnd);
 }
 
-void CrystalFrameCore::OnStartHidden() {
-    CF_LOG(Info, "Start menu hidden");
-    
-    if (m_overlayHost) {
-        m_overlayHost->HideStartOverlay();
-    }
-    
-    if (m_ipc) {
-        m_ipc->SendStatusUpdate(GetCurrentStatus());
-    }
+void Core::OnStartHidden() {
+    CF_LOG(Debug, "Start menu hidden");
 }
 
-void CrystalFrameCore::OnStartDetectionFailed() {
-    CF_LOG(Warning, "Start menu detection failed - disabling Start overlay");
-    
+void Core::OnStartDetectionFailed() {
+    CF_LOG(Warning, "Start menu detection failed - disabling Start transparency");
+    m_startDetected = false;
+}
+
+// Public API implementation
+void Core::SetTaskbarOpacity(int opacity) {
+    m_taskbarOpacity = opacity;
+
     if (m_renderer) {
-        m_renderer->SetStartEnabled(false);
+        m_renderer->SetTaskbarOpacity(opacity);
     }
-    
-    if (m_overlayHost) {
-        m_overlayHost->HideStartOverlay();
-    }
-    
-    if (m_ipc) {
-        m_ipc->SendError("Start menu detection unreliable", "START_DETECTION_FAILED");
-        m_ipc->SendStatusUpdate(GetCurrentStatus());
-    }
-}
 
-// ========== IIpcCallback Implementation ==========
-
-void CrystalFrameCore::OnSetTaskbarOpacity(int opacity) {
-    CF_LOG(Info, "IPC: SetTaskbarOpacity(" << opacity << ")");
-    
-    if (m_renderer) {
-        m_renderer->SetTaskbarOpacity(opacity / 100.0f);
-    }
-    
     if (m_config) {
         m_config->SetTaskbarOpacity(opacity);
-        m_config->Save();
     }
 }
 
-void CrystalFrameCore::OnSetStartOpacity(int opacity) {
-    CF_LOG(Info, "IPC: SetStartOpacity(" << opacity << ")");
-    
+void Core::SetStartOpacity(int opacity) {
+    m_startOpacity = opacity;
+
     if (m_renderer) {
-        m_renderer->SetStartOpacity(opacity / 100.0f);
+        m_renderer->SetStartOpacity(opacity);
     }
-    
+
     if (m_config) {
         m_config->SetStartOpacity(opacity);
-        m_config->Save();
     }
 }
 
-void CrystalFrameCore::OnSetTaskbarEnabled(bool enabled) {
-    CF_LOG(Info, "IPC: SetTaskbarEnabled(" << enabled << ")");
-    
+void Core::SetTaskbarEnabled(bool enabled) {
+    m_taskbarEnabled = enabled;
+
     if (m_renderer) {
         m_renderer->SetTaskbarEnabled(enabled);
     }
-    
+
     if (m_config) {
         m_config->SetTaskbarEnabled(enabled);
-        m_config->Save();
     }
 }
 
-void CrystalFrameCore::OnSetStartEnabled(bool enabled) {
-    CF_LOG(Info, "IPC: SetStartEnabled(" << enabled << ")");
-    
+void Core::SetStartEnabled(bool enabled) {
+    m_startEnabled = enabled;
+
     if (m_renderer) {
         m_renderer->SetStartEnabled(enabled);
     }
-    
+
     if (m_config) {
         m_config->SetStartEnabled(enabled);
-        m_config->Save();
     }
 }
 
-void CrystalFrameCore::OnGetStatus() {
-    CF_LOG(Debug, "IPC: GetStatus");
-    
-    if (m_ipc) {
-        m_ipc->SendStatusUpdate(GetCurrentStatus());
+void Core::SetTaskbarColor(int r, int g, int b) {
+    if (m_renderer) {
+        m_renderer->SetTaskbarColor(r, g, b);
+    }
+    CF_LOG(Info, "Taskbar color set to RGB(" << r << ", " << g << ", " << b << ")");
+}
+
+void Core::SetStartMenuHookEnabled(bool enabled) {
+    if (m_startMenuHook) {
+        m_startMenuHook->SetEnabled(enabled);
+        CF_LOG(Info, "Custom Start Menu hook " << (enabled ? "ENABLED" : "DISABLED"));
     }
 }
 
-void CrystalFrameCore::OnShutdown() {
-    CF_LOG(Info, "IPC: Shutdown requested by Dashboard");
-    
-    // Send acknowledgment before shutting down
-    if (m_ipc) {
-        m_ipc->SendStatusUpdate(GetCurrentStatus());
+void Core::SetStartMenuOpacity(int opacity) {
+    if (m_startMenuWindow) {
+        m_startMenuWindow->SetOpacity(opacity);
+        CF_LOG(Info, "Start Menu opacity set to " << opacity << "%");
     }
-    
-    // Post quit message to exit the message loop gracefully
-    m_running = false;
-    PostQuitMessage(0);
 }
 
-// ========== Helper Methods ==========
+void Core::SetStartMenuBackgroundColor(DWORD rgb) {
+    if (m_startMenuWindow) {
+        m_startMenuWindow->SetBackgroundColor(static_cast<COLORREF>(rgb));
+        CF_LOG(Info, "Start Menu background color set to 0x" << std::hex << rgb << std::dec);
+    }
+}
 
-StatusData CrystalFrameCore::GetCurrentStatus() {
-    StatusData status = {};
-    
-    if (m_locator) {
-        TaskbarInfo taskbarInfo = m_locator->GetTaskbarInfo();
-        status.taskbar.found = taskbarInfo.found;
-        
-        // Proper wide-to-narrow string conversion
-        const wchar_t* edgeStr = EdgeToString(taskbarInfo.edge);
-        int len = WideCharToMultiByte(CP_UTF8, 0, edgeStr, -1, nullptr, 0, nullptr, nullptr);
-        if (len > 0) {
-            status.taskbar.edge.resize(len - 1);  // exclude null terminator
-            WideCharToMultiByte(CP_UTF8, 0, edgeStr, -1, &status.taskbar.edge[0], len, nullptr, nullptr);
+void Core::SetStartMenuTextColor(DWORD rgb) {
+    if (m_startMenuWindow) {
+        m_startMenuWindow->SetTextColor(static_cast<COLORREF>(rgb));
+        CF_LOG(Info, "Start Menu text color set to 0x" << std::hex << rgb << std::dec);
+    }
+}
+
+void Core::SetStartMenuItems(bool controlPanel, bool deviceManager, bool installedApps,
+                             bool documents, bool pictures, bool videos, bool recentFiles) {
+    if (m_startMenuWindow) {
+        m_startMenuWindow->SetMenuItems(controlPanel, deviceManager, installedApps,
+                                        documents, pictures, videos, recentFiles);
+        CF_LOG(Info, "Start Menu items updated");
+    }
+}
+
+void Core::OnCustomStartMenuRequested(int x, int y) {
+    CF_LOG(Info, "Custom Start Menu requested at (" << x << ", " << y << ")");
+
+    if (m_startMenuWindow) {
+        if (m_startMenuWindow->IsVisible()) {
+            // Already visible - toggle off
+            m_startMenuWindow->Hide();
+        } else {
+            // Show the custom Start Menu
+            m_startMenuWindow->Show(x, y);
         }
-        
-        status.taskbar.autoHide = taskbarInfo.autoHide;
-        
-        StartInfo startInfo = m_locator->GetStartInfo();
-        status.start.detected = startInfo.detected;
-        status.start.isOpen = startInfo.isOpen;
-        status.start.confidence = startInfo.confidence;
     }
-    
-    if (m_config) {
-        Config config = m_config->GetConfig();
-        status.taskbar.enabled = config.taskbarEnabled;
-        status.taskbar.opacity = config.taskbarOpacity;
-        status.start.enabled = config.startEnabled;
-        status.start.opacity = config.startOpacity;
+}
+
+void Core::RefreshTransparency() {
+    if (m_renderer) {
+        m_renderer->RefreshTransparency();
     }
-    
-    return status;
 }
 
 } // namespace CrystalFrame

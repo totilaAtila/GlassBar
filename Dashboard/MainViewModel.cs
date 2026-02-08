@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 
@@ -7,29 +8,16 @@ namespace CrystalFrame.Dashboard
 {
     public class MainViewModel : INotifyPropertyChanged
     {
-        private readonly IpcClient _ipc;
+        private readonly CoreManager _core;
         private readonly ConfigManager _config;
-        private readonly CoreProcessManager _coreManager;
-        private readonly DebounceTimer _taskbarDebounce;
-        private readonly DebounceTimer _startDebounce;
 
         public MainViewModel()
         {
-            _ipc = new IpcClient();
+            _core = new CoreManager();
             _config = new ConfigManager();
-            _coreManager = new CoreProcessManager(_ipc);
 
-            // 250ms debounce for slider updates
-            _taskbarDebounce = new DebounceTimer(250, async () =>
-                await _ipc.SendCommandAsync("SetTaskbarOpacity", new { opacity = TaskbarOpacity }));
-
-            _startDebounce = new DebounceTimer(250, async () =>
-                await _ipc.SendCommandAsync("SetStartOpacity", new { opacity = StartOpacity }));
-
-            _ipc.StatusUpdated += OnStatusUpdated;
-            _ipc.ErrorReceived += OnErrorReceived;
-            _ipc.ConnectionChanged += OnConnectionChanged;
-            _coreManager.CoreRunningChanged += OnCoreRunningChanged;
+            _core.CoreRunningChanged += OnCoreRunningChanged;
+            _core.StatusUpdated += OnStatusUpdated;
         }
 
         // Properties
@@ -59,6 +47,87 @@ namespace CrystalFrame.Dashboard
             }
         }
 
+        private int _taskbarColorR;
+        public int TaskbarColorR
+        {
+            get => _taskbarColorR;
+            set
+            {
+                if (SetProperty(ref _taskbarColorR, value))
+                {
+                    _config.TaskbarColorR = value;
+                }
+            }
+        }
+
+        private int _taskbarColorG;
+        public int TaskbarColorG
+        {
+            get => _taskbarColorG;
+            set
+            {
+                if (SetProperty(ref _taskbarColorG, value))
+                {
+                    _config.TaskbarColorG = value;
+                }
+            }
+        }
+
+        private int _taskbarColorB;
+        public int TaskbarColorB
+        {
+            get => _taskbarColorB;
+            set
+            {
+                if (SetProperty(ref _taskbarColorB, value))
+                {
+                    _config.TaskbarColorB = value;
+                }
+            }
+        }
+
+        // Start Menu Background Color
+        private int _startBgColorR;
+        public int StartBgColorR { get => _startBgColorR; set { if (SetProperty(ref _startBgColorR, value)) _config.StartBgColorR = value; } }
+
+        private int _startBgColorG;
+        public int StartBgColorG { get => _startBgColorG; set { if (SetProperty(ref _startBgColorG, value)) _config.StartBgColorG = value; } }
+
+        private int _startBgColorB;
+        public int StartBgColorB { get => _startBgColorB; set { if (SetProperty(ref _startBgColorB, value)) _config.StartBgColorB = value; } }
+
+        // Start Menu Text Color
+        private int _startTextColorR;
+        public int StartTextColorR { get => _startTextColorR; set { if (SetProperty(ref _startTextColorR, value)) _config.StartTextColorR = value; } }
+
+        private int _startTextColorG;
+        public int StartTextColorG { get => _startTextColorG; set { if (SetProperty(ref _startTextColorG, value)) _config.StartTextColorG = value; } }
+
+        private int _startTextColorB;
+        public int StartTextColorB { get => _startTextColorB; set { if (SetProperty(ref _startTextColorB, value)) _config.StartTextColorB = value; } }
+
+        // Start Menu Items
+        private bool _startShowControlPanel;
+        public bool StartShowControlPanel { get => _startShowControlPanel; set { if (SetProperty(ref _startShowControlPanel, value)) _config.StartShowControlPanel = value; } }
+
+        private bool _startShowDeviceManager;
+        public bool StartShowDeviceManager { get => _startShowDeviceManager; set { if (SetProperty(ref _startShowDeviceManager, value)) _config.StartShowDeviceManager = value; } }
+
+        private bool _startShowInstalledApps;
+        public bool StartShowInstalledApps { get => _startShowInstalledApps; set { if (SetProperty(ref _startShowInstalledApps, value)) _config.StartShowInstalledApps = value; } }
+
+        private bool _startShowDocuments;
+        public bool StartShowDocuments { get => _startShowDocuments; set { if (SetProperty(ref _startShowDocuments, value)) _config.StartShowDocuments = value; } }
+
+        private bool _startShowPictures;
+        public bool StartShowPictures { get => _startShowPictures; set { if (SetProperty(ref _startShowPictures, value)) _config.StartShowPictures = value; } }
+
+        private bool _startShowVideos;
+        public bool StartShowVideos { get => _startShowVideos; set { if (SetProperty(ref _startShowVideos, value)) _config.StartShowVideos = value; } }
+
+        private bool _startShowRecentFiles;
+        public bool StartShowRecentFiles { get => _startShowRecentFiles; set { if (SetProperty(ref _startShowRecentFiles, value)) _config.StartShowRecentFiles = value; } }
+
         private bool _taskbarEnabled;
         public bool TaskbarEnabled
         {
@@ -87,7 +156,7 @@ namespace CrystalFrame.Dashboard
             set => SetProperty(ref _startDetected, value);
         }
 
-        private string _connectionStatus = "Connecting...";
+        private string _connectionStatus = "Initializing...";
         public string ConnectionStatus
         {
             get => _connectionStatus;
@@ -101,148 +170,278 @@ namespace CrystalFrame.Dashboard
             set => SetProperty(ref _coreRunning, value);
         }
 
-        // Methods
-        public async Task InitializeAsync()
+        private bool _coreEnabled = true;
+        public bool CoreEnabled
         {
-            // Load config
-            await _config.LoadAsync();
-
-            // Apply loaded config to properties
-            TaskbarOpacity = _config.TaskbarOpacity;
-            StartOpacity = _config.StartOpacity;
-            TaskbarEnabled = _config.TaskbarEnabled;
-            StartEnabled = _config.StartEnabled;
-
-            // Ensure Core is running (auto-launch if needed)
-            CoreRunning = _coreManager.EnsureCoreRunning();
-
-            if (!CoreRunning)
+            get => _coreEnabled;
+            set
             {
-                ConnectionStatus = "✗ Failed to start Core engine";
-                return;
+                if (SetProperty(ref _coreEnabled, value))
+                {
+                    _config.CoreEnabled = value;
+                }
             }
+        }
 
-            // Connect to Core via IPC
+        private string _extractionError = string.Empty;
+        public string ExtractionError
+        {
+            get => _extractionError;
+            set => SetProperty(ref _extractionError, value);
+        }
+
+        // Methods
+        public async Task<bool> InitializeAsync()
+        {
             try
             {
-                await _ipc.ConnectAsync();
-                ConnectionStatus = "✓ Connected to Core";
+                // Load config
+                await _config.LoadAsync();
+                Debug.WriteLine("Config loaded successfully");
+
+                // Apply loaded config to properties
+                TaskbarOpacity = _config.TaskbarOpacity;
+                StartOpacity = _config.StartOpacity;
+                TaskbarEnabled = _config.TaskbarEnabled;
+                StartEnabled = _config.StartEnabled;
+                CoreEnabled = _config.CoreEnabled;
+                TaskbarColorR = _config.TaskbarColorR;
+                TaskbarColorG = _config.TaskbarColorG;
+                TaskbarColorB = _config.TaskbarColorB;
+
+                StartBgColorR = _config.StartBgColorR;
+                StartBgColorG = _config.StartBgColorG;
+                StartBgColorB = _config.StartBgColorB;
+
+                StartTextColorR = _config.StartTextColorR;
+                StartTextColorG = _config.StartTextColorG;
+                StartTextColorB = _config.StartTextColorB;
+
+                StartShowControlPanel = _config.StartShowControlPanel;
+                StartShowDeviceManager = _config.StartShowDeviceManager;
+                StartShowInstalledApps = _config.StartShowInstalledApps;
+                StartShowDocuments = _config.StartShowDocuments;
+                StartShowPictures = _config.StartShowPictures;
+                StartShowVideos = _config.StartShowVideos;
+                StartShowRecentFiles = _config.StartShowRecentFiles;
+
+                // Initialize Core engine (native DLL)
+                bool success = _core.Initialize();
+
+                if (!success)
+                {
+                    ConnectionStatus = "✗ Failed to initialize Core engine";
+                    Debug.WriteLine("Core initialization failed");
+                    return false;
+                }
+
+                CoreRunning = true;
+                ConnectionStatus = "✓ Core engine running";
+
+                // Apply initial settings to Core
+                _core.SetTaskbarOpacity(TaskbarOpacity);
+                _core.SetStartOpacity(StartOpacity);
+                _core.SetTaskbarEnabled(TaskbarEnabled);
+                _core.SetStartEnabled(StartEnabled);
+                _core.SetTaskbarColor(TaskbarColorR, TaskbarColorG, TaskbarColorB);
+
+                // Apply Start Menu customization
+                _core.SetStartMenuOpacity(StartOpacity);
+                _core.SetStartMenuBackgroundColor(StartBgColorR, StartBgColorG, StartBgColorB);
+                _core.SetStartMenuTextColor(StartTextColorR, StartTextColorG, StartTextColorB);
+                _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
+                                        StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
+
+                // TESTING: Enable Start Menu hook to intercept Windows key and Start button
+                _core.SetStartMenuHookEnabled(true);
+                Debug.WriteLine("[TEST] Start Menu hook ENABLED");
+
+                Debug.WriteLine("ViewModel initialized successfully");
+                return true;
             }
             catch (Exception ex)
             {
-                ConnectionStatus = $"✗ Connection failed: {ex.Message}";
+                Debug.WriteLine($"ViewModel.InitializeAsync exception: {ex.Message}\n{ex.StackTrace}");
+                ConnectionStatus = $"✗ Initialization error: {ex.Message}";
+                throw;
             }
         }
 
         /// <summary>
-        /// Toggle Core ON/OFF. When OFF, the overlay effects stop.
-        /// When ON, Core is relaunched and IPC reconnects automatically.
+        /// Toggle Core ON/OFF
         /// </summary>
         public async Task SetCoreRunningAsync(bool running)
         {
+            // Update the CoreEnabled preference
+            CoreEnabled = running;
+
             if (running)
             {
-                CoreRunning = _coreManager.StartCore();
+                bool success = _core.Initialize();
+                CoreRunning = success;
 
-                if (CoreRunning)
+                if (success)
                 {
-                    // Give Core a moment to create the pipe
-                    await Task.Delay(500);
-                    
-                    try
-                    {
-                        await _ipc.ConnectAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        ConnectionStatus = $"✗ Connection failed: {ex.Message}";
-                    }
+                    await Task.Delay(100); // Brief delay for Core to settle
+
+                    // Reapply settings
+                    _core.SetTaskbarOpacity(TaskbarOpacity);
+                    _core.SetStartOpacity(StartOpacity);
+                    _core.SetTaskbarEnabled(TaskbarEnabled);
+                    _core.SetStartEnabled(StartEnabled);
+                    _core.SetTaskbarColor(TaskbarColorR, TaskbarColorG, TaskbarColorB);
+
+                    // Reapply Start Menu customization
+                    _core.SetStartMenuOpacity(StartOpacity);
+                    _core.SetStartMenuBackgroundColor(StartBgColorR, StartBgColorG, StartBgColorB);
+                    _core.SetStartMenuTextColor(StartTextColorR, StartTextColorG, StartTextColorB);
+                    _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
+                                            StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
+
+                    // TESTING: Re-enable Start Menu hook
+                    _core.SetStartMenuHookEnabled(true);
+                    Debug.WriteLine("[TEST] Start Menu hook re-enabled after restart");
+
+                    ConnectionStatus = "✓ Core engine running";
+                }
+                else
+                {
+                    ConnectionStatus = "✗ Failed to start Core";
                 }
             }
             else
             {
-                await _coreManager.StopCoreAsync();
+                _core.Shutdown();
                 CoreRunning = false;
+                ConnectionStatus = "Core engine stopped";
             }
-        }
-
-        /// <summary>
-        /// Called when Dashboard closes. Does NOT stop Core — effects persist.
-        /// </summary>
-        public void OnDashboardClosing()
-        {
-            _coreManager.Dispose();
-            _ipc.Dispose();
         }
 
         public async Task SetTaskbarEnabledAsync(bool enabled)
         {
             TaskbarEnabled = enabled;
-            // Config is saved automatically via property setter → ConfigManager debounced save
-            await _ipc.SendCommandAsync("SetTaskbarEnabled", new { enabled });
+            _core.SetTaskbarEnabled(enabled);
+            await Task.CompletedTask;
         }
 
         public async Task SetStartEnabledAsync(bool enabled)
         {
             StartEnabled = enabled;
-            // Config is saved automatically via property setter → ConfigManager debounced save
-            await _ipc.SendCommandAsync("SetStartEnabled", new { enabled });
+            _core.SetStartEnabled(enabled);
+            await Task.CompletedTask;
         }
 
         public void OnTaskbarOpacityChanged(int value)
         {
             TaskbarOpacity = value;
-            _taskbarDebounce.Trigger();  // Debounced IPC send
+            _core.SetTaskbarOpacity(value);
         }
 
         public void OnStartOpacityChanged(int value)
         {
             StartOpacity = value;
-            _startDebounce.Trigger();  // Debounced IPC send
+            _core.SetStartOpacity(value); // Windows Start Menu (native)
+            _core.SetStartMenuOpacity(value); // Custom Start Menu window
         }
 
-        private void OnStatusUpdated(object sender, StatusUpdateEventArgs e)
+        public void OnTaskbarColorChanged(int r, int g, int b)
+        {
+            TaskbarColorR = r;
+            TaskbarColorG = g;
+            TaskbarColorB = b;
+            _core.SetTaskbarColor(r, g, b);
+        }
+
+        public void OnStartBgColorChanged(int r, int g, int b)
+        {
+            StartBgColorR = r;
+            StartBgColorG = g;
+            StartBgColorB = b;
+            _core.SetStartMenuBackgroundColor(r, g, b);
+        }
+
+        public void OnStartTextColorChanged(int r, int g, int b)
+        {
+            StartTextColorR = r;
+            StartTextColorG = g;
+            StartTextColorB = b;
+            _core.SetStartMenuTextColor(r, g, b);
+        }
+
+        public void OnStartMenuItemChanged(string itemName, bool visible)
+        {
+            switch (itemName)
+            {
+                case "ControlPanel":
+                    StartShowControlPanel = visible;
+                    break;
+                case "DeviceManager":
+                    StartShowDeviceManager = visible;
+                    break;
+                case "InstalledApps":
+                    StartShowInstalledApps = visible;
+                    break;
+                case "Documents":
+                    StartShowDocuments = visible;
+                    break;
+                case "Pictures":
+                    StartShowPictures = visible;
+                    break;
+                case "Videos":
+                    StartShowVideos = visible;
+                    break;
+                case "RecentFiles":
+                    StartShowRecentFiles = visible;
+                    break;
+            }
+
+            // Apply to Core
+            _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
+                                    StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
+        }
+
+        private void OnStatusUpdated(object sender, CoreNative.CoreStatus status)
         {
             // Update UI properties from Core status
-            TaskbarFound = e.Status.Taskbar.Found;
-            StartDetected = e.Status.Start.Detected;
-        }
-
-        private void OnErrorReceived(object sender, string error)
-        {
-            ConnectionStatus = $"✗ Error: {error}";
-        }
-
-        private void OnConnectionChanged(object sender, bool connected)
-        {
-            ConnectionStatus = connected 
-                ? "✓ Connected to Core" 
-                : "⟳ Reconnecting to Core...";
+            TaskbarFound = status.Taskbar.Found;
+            StartDetected = status.Start.Detected;
         }
 
         private void OnCoreRunningChanged(object sender, bool running)
         {
             CoreRunning = running;
-            if (!running)
-            {
-                ConnectionStatus = "● Core stopped";
-            }
+            ConnectionStatus = running ? "✓ Core engine running" : "Core engine stopped";
         }
 
-        // INotifyPropertyChanged
-        public event PropertyChangedEventHandler PropertyChanged;
+        /// <summary>
+        /// Called when Dashboard closes
+        /// </summary>
+        public async Task OnDashboardClosingAsync()
+        {
+            if (!CoreEnabled)
+            {
+                Debug.WriteLine("CoreEnabled=false, shutting down Core");
+                _core.Shutdown();
+            }
+            else
+            {
+                Debug.WriteLine("CoreEnabled=true, leaving Core running in background");
+            }
 
-        protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = null)
+            _core.Dispose();
+            await Task.CompletedTask;
+        }
+
+        // INotifyPropertyChanged implementation
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
         {
             if (Equals(field, value)) return false;
-            field = value;
-            OnPropertyChanged(propertyName);
-            return true;
-        }
 
-        protected void OnPropertyChanged([CallerMemberName] string propertyName = null)
-        {
+            field = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            return true;
         }
     }
 }

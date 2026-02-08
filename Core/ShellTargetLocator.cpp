@@ -5,6 +5,18 @@
 
 namespace CrystalFrame {
 
+// Helper function to convert wide string to UTF-8 for logging
+static std::string WideToUtf8(const wchar_t* wstr) {
+    if (!wstr || !*wstr) return "";
+
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return "";
+
+    std::string result(size - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, &result[0], size, nullptr, nullptr);
+    return result;
+}
+
 ShellTargetLocator::ShellTargetLocator() {
 }
 
@@ -238,9 +250,9 @@ void ShellTargetLocator::MonitorStart() {
         
         // Check for state change
         bool stateChanged = (newState.isOpen != lastState.isOpen);
-        
+
         if (stateChanged) {
-            if (newState.isOpen && newState.confidence >= 0.6f) {
+            if (newState.isOpen && newState.confidence >= 0.4f) {
                 // Start opened
                 CF_LOG(Info, "Start menu opened (confidence: " << newState.confidence << ")");
                 
@@ -331,59 +343,70 @@ HWND ShellTargetLocator::FindStartMenuWindow() {
     const wchar_t* classNames[] = {
         L"Windows.UI.Core.CoreWindow",
         L"Xaml_WindowedPopupClass",
+        L"Windows.UI.Composition.DesktopWindowContentBridge",  // Windows 11 23H2+
+        L"ApplicationFrameWindow",  // Possible on some builds
+        L"Shell_CharmWindow",       // Search charm
     };
-    
+
     for (const auto* className : classNames) {
         HWND found = nullptr;
-        
+        auto enumData = std::make_pair(className, &found);
+
         // Enumerate windows
         EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
             auto* data = reinterpret_cast<std::pair<const wchar_t*, HWND*>*>(lParam);
-            
+
             wchar_t actualClass[256];
             GetClassNameW(hwnd, actualClass, 256);
-            
+
+            wchar_t title[256];
+            GetWindowTextW(hwnd, title, 256);
+
             if (wcscmp(actualClass, data->first) == 0) {
+                // Log ALL matches for this class, not just filtered ones
+                CF_LOG(Info, "FOUND MATCH: class=" << WideToUtf8(actualClass)
+                              << ", title=\"" << WideToUtf8(title) << "\""
+                              << ", visible=" << IsWindowVisible(hwnd));
+
                 if (IsWindowVisible(hwnd)) {
-                    wchar_t title[256];
-                    GetWindowTextW(hwnd, title, 256);
-                    
-                    // Start menu usually has empty or "Start" title
-                    if (wcslen(title) == 0 || wcscmp(title, L"Start") == 0) {
+                    // Relaxed filter: accept empty title, or title containing "Start" or "Search"
+                    if (wcslen(title) == 0 ||
+                        wcsstr(title, L"Start") != nullptr ||
+                        wcsstr(title, L"Search") != nullptr) {
                         *(data->second) = hwnd;
                         return FALSE;  // Stop enumeration
                     }
                 }
             }
-            
+
             return TRUE;  // Continue
-        }, reinterpret_cast<LPARAM>(&std::make_pair(className, &found)));
-        
+        }, reinterpret_cast<LPARAM>(&enumData));
+
         if (found) {
             return found;
         }
     }
-    
+
     return nullptr;
 }
 
 bool ShellTargetLocator::VerifyStartMenuRect(const RECT& rect) {
     int width = rect.right - rect.left;
     int height = rect.bottom - rect.top;
-    
-    // Reasonable size checks
-    if (width < 300 || height < 400) {
+
+    // Relaxed size checks for various Start menu sizes
+    if (width < 200 || height < 200) {
         return false;
     }
-    
-    if (width > 1200 || height > 1000) {
+
+    if (width > 2000 || height > 1500) {
         return false;
     }
     
     // Get screen dimensions
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-    
+    (void)GetSystemMetrics(SM_CYSCREEN);  // screenHeight unused for now
+
     // Check if roughly centered horizontally
     int centerX = rect.left + width / 2;
     int screenCenterX = screenWidth / 2;

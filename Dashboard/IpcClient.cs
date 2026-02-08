@@ -103,16 +103,19 @@ namespace CrystalFrame.Dashboard
                     IsConnected = true;
                     ConnectionChanged?.Invoke(this, true);
                     Debug.WriteLine("IPC connected to Core");
-                    
+
+                    // Request current status from Core
+                    await SendCommandAsync("GetStatus", new { });
+
                     // ✅ ADDED: Signal first connection success
                     if (!firstConnectionAttempted)
                     {
                         _firstConnectionTcs?.TrySetResult(true);
                         firstConnectionAttempted = true;
                     }
-                    
+
                     attempt = 0;  // Reset on successful connection
-                    
+
                     // Start listener (will return when connection drops)
                     await ListenAsync(ct);
                 }

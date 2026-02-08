@@ -89,13 +89,13 @@ private:
     LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 };
 
-inline const wchar_t* EdgeToString(Edge edge) {
+inline const char* EdgeToString(Edge edge) {
     switch (edge) {
-        case Edge::Bottom: return L"bottom";
-        case Edge::Top:    return L"top";
-        case Edge::Left:   return L"left";
-        case Edge::Right:  return L"right";
-        default:           return L"unknown";
+        case Edge::Bottom: return "bottom";
+        case Edge::Top:    return "top";
+        case Edge::Left:   return "left";
+        case Edge::Right:  return "right";
+        default:           return "unknown";
     }
 }
 

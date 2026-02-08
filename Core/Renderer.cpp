@@ -1,6 +1,6 @@
 #include "Renderer.h"
 #include "Diagnostics.h"
-#include <cmath>
+#include <algorithm>
 
 namespace CrystalFrame {
 
@@ -11,253 +11,228 @@ Renderer::~Renderer() {
     Shutdown();
 }
 
-bool Renderer::Initialize(HWND hwndTaskbar, HWND hwndStart) {
-    // Store host window for deferred commit messages
-    m_hwndHost = hwndTaskbar;
-    
-    // Create DirectComposition device
-    HRESULT hr = DCompositionCreateDevice(
-        nullptr,
-        __uuidof(IDCompositionDevice),
-        reinterpret_cast<void**>(m_dcompDevice.GetAddressOf())
+bool Renderer::Initialize() {
+    // Load SetWindowCompositionAttribute from user32.dll
+    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
+    if (!hUser32) {
+        hUser32 = LoadLibraryW(L"user32.dll");
+    }
+
+    if (!hUser32) {
+        CF_LOG(Error, "Failed to load user32.dll");
+        return false;
+    }
+
+    m_setWindowCompositionAttribute = reinterpret_cast<pfnSetWindowCompositionAttribute>(
+        GetProcAddress(hUser32, "SetWindowCompositionAttribute")
     );
-    
-    if (FAILED(hr)) {
-        CF_LOG(Error, "DCompositionCreateDevice failed: 0x" << std::hex << hr);
+
+    if (!m_setWindowCompositionAttribute) {
+        CF_LOG(Error, "SetWindowCompositionAttribute not found in user32.dll");
         return false;
     }
-    
-    CF_LOG(Info, "DirectComposition device created");
-    
-    // Create composition target for Taskbar overlay
-    hr = m_dcompDevice->CreateTargetForHwnd(hwndTaskbar, TRUE, m_targetTaskbar.GetAddressOf());
-    if (FAILED(hr)) {
-        CF_LOG(Error, "CreateTargetForHwnd (Taskbar) failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    // Create composition target for Start overlay
-    hr = m_dcompDevice->CreateTargetForHwnd(hwndStart, TRUE, m_targetStart.GetAddressOf());
-    if (FAILED(hr)) {
-        CF_LOG(Error, "CreateTargetForHwnd (Start) failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    // Create root visuals
-    hr = m_dcompDevice->CreateVisual(m_visualTaskbar.GetAddressOf());
-    if (FAILED(hr)) {
-        CF_LOG(Error, "CreateVisual (Taskbar) failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    hr = m_dcompDevice->CreateVisual(m_visualStart.GetAddressOf());
-    if (FAILED(hr)) {
-        CF_LOG(Error, "CreateVisual (Start) failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    // Set root visuals to targets
-    m_targetTaskbar->SetRoot(m_visualTaskbar.Get());
-    m_targetStart->SetRoot(m_visualStart.Get());
-    
-    // Set initial opacity
-    m_visualTaskbar->SetOpacity(m_taskbarOpacity);
-    m_visualStart->SetOpacity(m_startOpacity);
-    
-    // Create simple overlay surfaces (semi-transparent black)
-    // These will just add a tint over the taskbar/start menu
-    RECT taskbarRect;
-    GetClientRect(hwndTaskbar, &taskbarRect);
-    CreateSolidColorSurface(m_visualTaskbar.Get(), 
-                           D2D1::ColorF(0.0f, 0.0f, 0.0f, 1.0f),
-                           taskbarRect.right - taskbarRect.left,
-                           taskbarRect.bottom - taskbarRect.top);
-    
-    RECT startRect;
-    GetClientRect(hwndStart, &startRect);
-    CreateSolidColorSurface(m_visualStart.Get(),
-                           D2D1::ColorF(0.0f, 0.0f, 0.0f, 1.0f),
-                           startRect.right - startRect.left,
-                           startRect.bottom - startRect.top);
-    
-    // Initial commit
-    CommitNow();
-    
-    CF_LOG(Info, "Renderer initialized successfully");
-    
+
+    CF_LOG(Info, "Renderer initialized (SetWindowCompositionAttribute ready)");
     return true;
 }
 
 void Renderer::Shutdown() {
-    // Release COM objects in reverse order
-    m_visualStart.Reset();
-    m_visualTaskbar.Reset();
-    m_targetStart.Reset();
-    m_targetTaskbar.Reset();
-    m_dcompDevice.Reset();
-    
+    // Restore original window states
+    if (m_hwndTaskbar) {
+        RestoreWindow(m_hwndTaskbar);
+    }
+    if (m_hwndStart) {
+        RestoreWindow(m_hwndStart);
+    }
+
     CF_LOG(Info, "Renderer shutdown");
 }
 
-void Renderer::SetTaskbarOpacity(float opacity) {
-    // Clamp to valid range
-    opacity = std::clamp(opacity, 0.0f, 1.0f);
-    
-    // Check if actually changed (avoid unnecessary updates)
-    if (std::abs(m_taskbarOpacity - opacity) < 0.01f) {
-        return;
-    }
-    
-    m_taskbarOpacity = opacity;
-    
-    if (m_visualTaskbar && m_taskbarEnabled) {
-        HRESULT hr = m_visualTaskbar->SetOpacity(opacity);
-        if (FAILED(hr)) {
-            CF_LOG(Error, "SetOpacity (Taskbar) failed: 0x" << std::hex << hr);
-            return;
-        }
-        
-        ScheduleCommit();
-        CF_LOG(Debug, "Taskbar opacity set to " << opacity);
+void Renderer::SetTaskbarWindow(HWND hwnd) {
+    m_hwndTaskbar = hwnd;
+    if (hwnd) {
+        ApplyTransparency(hwnd, m_taskbarOpacity, m_taskbarEnabled);
+        CF_LOG(Info, "Taskbar window set: 0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd));
     }
 }
 
-void Renderer::SetStartOpacity(float opacity) {
-    // Clamp to valid range
-    opacity = std::clamp(opacity, 0.0f, 1.0f);
-    
-    // Check if actually changed
-    if (std::abs(m_startOpacity - opacity) < 0.01f) {
-        return;
+void Renderer::SetStartWindow(HWND hwnd) {
+    m_hwndStart = hwnd;
+    if (hwnd) {
+        ApplyTransparency(hwnd, m_startOpacity, m_startEnabled);
+        CF_LOG(Info, "Start window set: 0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd));
     }
-    
+}
+
+void Renderer::SetTaskbarOpacity(int opacity) {
+    opacity = std::clamp(opacity, 0, 100);
+    m_taskbarOpacity = opacity;
+
+    if (m_hwndTaskbar && m_taskbarEnabled) {
+        ApplyTransparency(m_hwndTaskbar, opacity, true);
+        CF_LOG(Debug, "Taskbar opacity set to " << opacity << "%");
+    }
+}
+
+void Renderer::SetStartOpacity(int opacity) {
+    opacity = std::clamp(opacity, 0, 100);
     m_startOpacity = opacity;
-    
-    if (m_visualStart && m_startEnabled) {
-        HRESULT hr = m_visualStart->SetOpacity(opacity);
-        if (FAILED(hr)) {
-            CF_LOG(Error, "SetOpacity (Start) failed: 0x" << std::hex << hr);
+
+    CF_LOG(Info, "SetStartOpacity called: opacity=" << opacity
+                 << ", m_hwndStart=" << m_hwndStart
+                 << ", m_startEnabled=" << m_startEnabled);
+
+    if (m_hwndStart && m_startEnabled) {
+        // Verify window is still valid
+        if (!IsWindow(m_hwndStart)) {
+            CF_LOG(Warning, "Start window handle is no longer valid!");
+            m_hwndStart = nullptr;
             return;
         }
-        
-        ScheduleCommit();
-        CF_LOG(Debug, "Start opacity set to " << opacity);
+
+        CF_LOG(Info, "Applying transparency to Start Menu window");
+        ApplyTransparency(m_hwndStart, opacity, true);
+        CF_LOG(Info, "Start opacity set to " << opacity << "%");
+    } else {
+        if (!m_hwndStart) {
+            CF_LOG(Warning, "Start window handle is NULL - cannot apply opacity");
+        }
+        if (!m_startEnabled) {
+            CF_LOG(Info, "Start transparency is disabled");
+        }
+    }
+}
+
+void Renderer::SetTaskbarColor(int r, int g, int b) {
+    m_taskbarColorR = std::clamp(r, 0, 255);
+    m_taskbarColorG = std::clamp(g, 0, 255);
+    m_taskbarColorB = std::clamp(b, 0, 255);
+
+    if (m_hwndTaskbar && m_taskbarEnabled) {
+        ApplyTransparencyWithColor(m_hwndTaskbar, m_taskbarOpacity, true, m_taskbarColorR, m_taskbarColorG, m_taskbarColorB);
     }
 }
 
 void Renderer::SetTaskbarEnabled(bool enabled) {
     m_taskbarEnabled = enabled;
-    
-    if (m_visualTaskbar) {
-        float opacity = enabled ? m_taskbarOpacity : 0.0f;
-        m_visualTaskbar->SetOpacity(opacity);
-        ScheduleCommit();
-        CF_LOG(Info, "Taskbar overlay " << (enabled ? "enabled" : "disabled"));
+
+    if (m_hwndTaskbar) {
+        if (enabled) {
+            ApplyTransparency(m_hwndTaskbar, m_taskbarOpacity, true);
+        } else {
+            RestoreWindow(m_hwndTaskbar);
+        }
+        CF_LOG(Info, "Taskbar transparency " << (enabled ? "enabled" : "disabled"));
     }
 }
 
 void Renderer::SetStartEnabled(bool enabled) {
     m_startEnabled = enabled;
-    
-    if (m_visualStart) {
-        float opacity = enabled ? m_startOpacity : 0.0f;
-        m_visualStart->SetOpacity(opacity);
-        ScheduleCommit();
-        CF_LOG(Info, "Start overlay " << (enabled ? "enabled" : "disabled"));
-    }
-}
 
-void Renderer::ScheduleCommit() {
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastCommit);
-    
-    // Throttle commits to ~60 FPS (16ms)
-    if (elapsed.count() >= 16) {
-        CommitNow();
-    } else if (!m_pendingCommit.exchange(true)) {
-        // Post a deferred commit to the message loop — processed on the next iteration
-        if (m_hwndHost) {
-            PostMessage(m_hwndHost, WM_DCOMP_COMMIT, 0, 0);
+    if (m_hwndStart) {
+        if (enabled) {
+            ApplyTransparency(m_hwndStart, m_startOpacity, true);
+        } else {
+            RestoreWindow(m_hwndStart);
         }
+        CF_LOG(Info, "Start transparency " << (enabled ? "enabled" : "disabled"));
     }
 }
 
-void Renderer::OnDeferredCommit() {
-    if (m_pendingCommit) {
-        CommitNow();
+void Renderer::ApplyTransparency(HWND hwnd, int opacity, bool enabled) {
+    if (hwnd == m_hwndTaskbar) {
+        ApplyTransparencyWithColor(hwnd, opacity, enabled, m_taskbarColorR, m_taskbarColorG, m_taskbarColorB);
+    } else {
+        ApplyTransparencyWithColor(hwnd, opacity, enabled, 0, 0, 0);
     }
 }
 
-void Renderer::CommitNow() {
-    if (!m_dcompDevice) {
+void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled, int r, int g, int b) {
+    // Check which window type this is
+    bool isStartMenu = (hwnd == m_hwndStart);
+    const char* windowType = isStartMenu ? "START MENU" : "TASKBAR";
+
+    CF_LOG(Info, "[" << windowType << "] ApplyTransparencyWithColor called: HWND=0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd) << std::dec
+                 << ", opacity=" << opacity << ", enabled=" << enabled << ", RGB=(" << r << "," << g << "," << b << ")");
+
+    if (!hwnd || !IsWindow(hwnd) || !m_setWindowCompositionAttribute) {
+        CF_LOG(Warning, "[" << windowType << "] ApplyTransparencyWithColor early return: hwnd=" << hwnd
+                      << ", IsWindow=" << (hwnd ? IsWindow(hwnd) : 0)
+                      << ", m_setWindowCompositionAttribute=" << (m_setWindowCompositionAttribute ? "valid" : "NULL"));
         return;
     }
-    
-    HRESULT hr = m_dcompDevice->Commit();
-    if (FAILED(hr)) {
-        CF_LOG(Error, "Commit failed: 0x" << std::hex << hr);
+
+    ACCENT_POLICY accent = {};
+
+    if (enabled && opacity > 0) {
+        // Use ACCENT_ENABLE_TRANSPARENTGRADIENT for true transparency
+        accent.AccentState = ACCENT_ENABLE_TRANSPARENTGRADIENT;
+
+        // Alpha from opacity slider (0% = opaque/255, 100% = transparent/0)
+        BYTE alpha = static_cast<BYTE>(((100 - opacity) * 255) / 100);
+
+        // GradientColor format: ABGR (Alpha, Blue, Green, Red)
+        // Combine: opacity slider (alpha channel) + RGB sliders (color)
+        DWORD gradientColor = (alpha << 24) | (b << 16) | (g << 8) | r;
+        accent.GradientColor = gradientColor;
+        accent.AccentFlags = 2;
+
+        CF_LOG(Info, "[" << windowType << "] Applying TRANSPARENTGRADIENT: opacity=" << opacity
+                     << "%, alpha=" << (int)alpha
+                     << ", RGB=(" << r << "," << g << "," << b << ")"
+                     << ", GradientColor=0x" << std::hex << gradientColor << std::dec);
+    } else {
+        // Disable transparency effect - normal opaque taskbar
+        accent.AccentState = ACCENT_DISABLED;
+        accent.GradientColor = 0;
+        accent.AccentFlags = 0;
+
+        CF_LOG(Info, "[" << windowType << "] Disabling transparency: opacity=" << opacity << "%, enabled=" << enabled);
     }
-    
-    m_lastCommit = std::chrono::steady_clock::now();
-    m_pendingCommit = false;
+
+    WINDOWCOMPOSITIONATTRIBDATA data = {};
+    data.Attrib = WCA_ACCENT_POLICY;
+    data.pvData = &accent;
+    data.cbData = sizeof(accent);
+
+    BOOL result = m_setWindowCompositionAttribute(hwnd, &data);
+    CF_LOG(Info, "SetWindowCompositionAttribute result: " << result
+                 << " for HWND 0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd) << std::dec);
 }
 
-bool Renderer::CreateSolidColorSurface(IDCompositionVisual* visual, D2D1_COLOR_F color, int width, int height) {
-    if (!visual || width <= 0 || height <= 0) {
-        return false;
+void Renderer::RestoreWindow(HWND hwnd) {
+    CF_LOG(Info, "RestoreWindow called for HWND 0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd) << std::dec);
+
+    if (!hwnd || !IsWindow(hwnd) || !m_setWindowCompositionAttribute) {
+        if (hwnd && !IsWindow(hwnd)) {
+            CF_LOG(Warning, "Window handle is no longer valid, cannot restore");
+        }
+        return;
     }
-    
-    // Create D2D factory
-    ComPtr<ID2D1Factory> d2dFactory;
-    HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2dFactory.GetAddressOf());
-    if (FAILED(hr)) {
-        CF_LOG(Error, "D2D1CreateFactory failed: 0x" << std::hex << hr);
-        return false;
+
+    ACCENT_POLICY accent = {};
+    accent.AccentState = ACCENT_DISABLED;
+    accent.AccentFlags = 0;
+    accent.GradientColor = 0;
+    accent.AnimationId = 0;
+
+    WINDOWCOMPOSITIONATTRIBDATA data = {};
+    data.Attrib = WCA_ACCENT_POLICY;
+    data.pvData = &accent;
+    data.cbData = sizeof(accent);
+
+    BOOL result = m_setWindowCompositionAttribute(hwnd, &data);
+    CF_LOG(Info, "RestoreWindow SetWindowCompositionAttribute result: " << result
+                 << " for HWND 0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd) << std::dec);
+}
+
+void Renderer::RefreshTransparency() {
+    // Reapply transparency to maintain the effect
+    // Windows can reset it on certain events
+    if (m_hwndTaskbar && m_taskbarEnabled) {
+        ApplyTransparency(m_hwndTaskbar, m_taskbarOpacity, true);
     }
-    
-    // Create DirectComposition surface
-    ComPtr<IDCompositionSurface> surface;
-    hr = m_dcompDevice->CreateSurface(
-        width, height,
-        DXGI_FORMAT_B8G8R8A8_UNORM,
-        DXGI_ALPHA_MODE_PREMULTIPLIED,
-        surface.GetAddressOf()
-    );
-    
-    if (FAILED(hr)) {
-        CF_LOG(Error, "CreateSurface failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    // Begin draw on surface
-    ComPtr<ID2D1DeviceContext> dc;
-    POINT offset = {};
-    hr = surface->BeginDraw(nullptr, __uuidof(ID2D1DeviceContext),
-                           reinterpret_cast<void**>(dc.GetAddressOf()), &offset);
-    
-    if (FAILED(hr)) {
-        CF_LOG(Error, "BeginDraw failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    // Clear with color
-    dc->Clear(color);
-    
-    // End draw
-    hr = surface->EndDraw();
-    if (FAILED(hr)) {
-        CF_LOG(Error, "EndDraw failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    // Set content to visual
-    hr = visual->SetContent(surface.Get());
-    if (FAILED(hr)) {
-        CF_LOG(Error, "SetContent failed: 0x" << std::hex << hr);
-        return false;
-    }
-    
-    return true;
+    // Skip refreshing Start menu - Windows handles it and refreshing causes flicker
 }
 
 } // namespace CrystalFrame

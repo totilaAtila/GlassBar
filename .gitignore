@@ -56,3 +56,4 @@ Package.StoreAssociation.xml
 *.tmp
 *.temp
 ~$*
+nul

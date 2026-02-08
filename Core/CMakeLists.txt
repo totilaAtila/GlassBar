@@ -5,34 +5,32 @@ project(CrystalFrame.Core)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Windows subsystem
-set(CMAKE_WIN32_EXECUTABLE ON)
-
-# Source files
+# Source files (removed main.cpp, IpcBridge.cpp - no longer needed)
 set(SOURCES
-    main.cpp
     Core.cpp
+    CoreApi.cpp
     Diagnostics.cpp
     ConfigManager.cpp
     ShellTargetLocator.cpp
-    OverlayHost.cpp
     Renderer.cpp
-    IpcBridge.cpp
+    StartMenuHook.cpp
+    StartMenuWindow.cpp
 )
 
-# Header files
+# Header files (removed IpcBridge.h, added CoreApi.h)
 set(HEADERS
     Core.h
+    CoreApi.h
     Diagnostics.h
     ConfigManager.h
     ShellTargetLocator.h
-    OverlayHost.h
     Renderer.h
-    IpcBridge.h
+    StartMenuHook.h
+    StartMenuWindow.h
 )
 
-# Create executable
-add_executable(CrystalFrame.Core WIN32 ${SOURCES} ${HEADERS})
+# Create shared library (DLL)
+add_library(CrystalFrame.Core SHARED ${SOURCES} ${HEADERS})
 
 # Link libraries
 target_link_libraries(CrystalFrame.Core
@@ -41,37 +39,54 @@ target_link_libraries(CrystalFrame.Core
     gdi32.lib
     shell32.lib
     advapi32.lib
-    
-    # DirectComposition
-    dcomp.lib
-    
-    # Direct2D
-    d2d1.lib
-    dwrite.lib
+    dwmapi.lib
 )
 
 # Compiler options for MSVC
 if(MSVC)
     target_compile_options(CrystalFrame.Core PRIVATE
         /W4                 # Warning level 4
-        /WX                 # Treat warnings as errors
         /permissive-        # Standards conformance
         /MP                 # Multi-processor compilation
     )
-    
-    # Unicode support
+
+    # Definitions
     target_compile_definitions(CrystalFrame.Core PRIVATE
         UNICODE
         _UNICODE
+        CRYSTALFRAME_EXPORTS  # Export symbols for DLL
     )
 endif()
 
 # Set output directory
 set_target_properties(CrystalFrame.Core PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
 # Installation
 install(TARGETS CrystalFrame.Core
     RUNTIME DESTINATION bin
+    LIBRARY DESTINATION bin
+    ARCHIVE DESTINATION lib
+)
+
+# Diagnostic tool (standalone executable)
+add_executable(WindowDiagnostic WindowDiagnostic.cpp)
+
+target_link_libraries(WindowDiagnostic
+    user32.lib
+    psapi.lib
+)
+
+if(MSVC)
+    target_compile_definitions(WindowDiagnostic PRIVATE
+        UNICODE
+        _UNICODE
+    )
+endif()
+
+set_target_properties(WindowDiagnostic PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )

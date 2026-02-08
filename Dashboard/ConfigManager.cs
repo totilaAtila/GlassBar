@@ -11,6 +11,34 @@ namespace CrystalFrame.Dashboard
         public int StartOpacity { get; set; } = 50;
         public bool TaskbarEnabled { get; set; } = true;
         public bool StartEnabled { get; set; } = true;
+        public bool CoreEnabled { get; set; } = true;  // Default ON - Core runs in background after Dashboard closes
+        public int TaskbarColorR { get; set; } = 0;
+        public int TaskbarColorG { get; set; } = 0;
+        public int TaskbarColorB { get; set; } = 0;
+
+        // Start Menu Background Color
+        public int StartBgColorR { get; set; } = 40;
+        public int StartBgColorG { get; set; } = 40;
+        public int StartBgColorB { get; set; } = 45;
+
+        // Start Menu Text Color
+        public int StartTextColorR { get; set; } = 255;
+        public int StartTextColorG { get; set; } = 255;
+        public int StartTextColorB { get; set; } = 255;
+
+        // Start Menu Items
+        public bool StartShowControlPanel { get; set; } = true;
+        public bool StartShowDeviceManager { get; set; } = true;
+        public bool StartShowInstalledApps { get; set; } = true;
+        public bool StartShowDocuments { get; set; } = true;
+        public bool StartShowPictures { get; set; } = true;
+        public bool StartShowVideos { get; set; } = true;
+        public bool StartShowRecentFiles { get; set; } = true;
+        public bool StartShowPlaceholder1 { get; set; } = false;
+        public bool StartShowPlaceholder2 { get; set; } = false;
+        public bool StartShowPlaceholder3 { get; set; } = false;
+        public bool StartShowPlaceholder4 { get; set; } = false;
+        public bool StartShowPlaceholder5 { get; set; } = false;
     }
 
     public class ConfigManager
@@ -69,6 +97,67 @@ namespace CrystalFrame.Dashboard
                 _ = SaveAsync();
             }
         }
+
+        public bool CoreEnabled
+        {
+            get => _config.CoreEnabled;
+            set
+            {
+                _config.CoreEnabled = value;
+                _ = SaveAsync();
+            }
+        }
+
+        public int TaskbarColorR
+        {
+            get => _config.TaskbarColorR;
+            set
+            {
+                _config.TaskbarColorR = value;
+                _ = SaveAsync();
+            }
+        }
+
+        public int TaskbarColorG
+        {
+            get => _config.TaskbarColorG;
+            set
+            {
+                _config.TaskbarColorG = value;
+                _ = SaveAsync();
+            }
+        }
+
+        public int TaskbarColorB
+        {
+            get => _config.TaskbarColorB;
+            set
+            {
+                _config.TaskbarColorB = value;
+                _ = SaveAsync();
+            }
+        }
+
+        public int StartBgColorR { get => _config.StartBgColorR; set { _config.StartBgColorR = value; _ = SaveAsync(); } }
+        public int StartBgColorG { get => _config.StartBgColorG; set { _config.StartBgColorG = value; _ = SaveAsync(); } }
+        public int StartBgColorB { get => _config.StartBgColorB; set { _config.StartBgColorB = value; _ = SaveAsync(); } }
+
+        public int StartTextColorR { get => _config.StartTextColorR; set { _config.StartTextColorR = value; _ = SaveAsync(); } }
+        public int StartTextColorG { get => _config.StartTextColorG; set { _config.StartTextColorG = value; _ = SaveAsync(); } }
+        public int StartTextColorB { get => _config.StartTextColorB; set { _config.StartTextColorB = value; _ = SaveAsync(); } }
+
+        public bool StartShowControlPanel { get => _config.StartShowControlPanel; set { _config.StartShowControlPanel = value; _ = SaveAsync(); } }
+        public bool StartShowDeviceManager { get => _config.StartShowDeviceManager; set { _config.StartShowDeviceManager = value; _ = SaveAsync(); } }
+        public bool StartShowInstalledApps { get => _config.StartShowInstalledApps; set { _config.StartShowInstalledApps = value; _ = SaveAsync(); } }
+        public bool StartShowDocuments { get => _config.StartShowDocuments; set { _config.StartShowDocuments = value; _ = SaveAsync(); } }
+        public bool StartShowPictures { get => _config.StartShowPictures; set { _config.StartShowPictures = value; _ = SaveAsync(); } }
+        public bool StartShowVideos { get => _config.StartShowVideos; set { _config.StartShowVideos = value; _ = SaveAsync(); } }
+        public bool StartShowRecentFiles { get => _config.StartShowRecentFiles; set { _config.StartShowRecentFiles = value; _ = SaveAsync(); } }
+        public bool StartShowPlaceholder1 { get => _config.StartShowPlaceholder1; set { _config.StartShowPlaceholder1 = value; _ = SaveAsync(); } }
+        public bool StartShowPlaceholder2 { get => _config.StartShowPlaceholder2; set { _config.StartShowPlaceholder2 = value; _ = SaveAsync(); } }
+        public bool StartShowPlaceholder3 { get => _config.StartShowPlaceholder3; set { _config.StartShowPlaceholder3 = value; _ = SaveAsync(); } }
+        public bool StartShowPlaceholder4 { get => _config.StartShowPlaceholder4; set { _config.StartShowPlaceholder4 = value; _ = SaveAsync(); } }
+        public bool StartShowPlaceholder5 { get => _config.StartShowPlaceholder5; set { _config.StartShowPlaceholder5 = value; _ = SaveAsync(); } }
 
         public async Task LoadAsync()
         {

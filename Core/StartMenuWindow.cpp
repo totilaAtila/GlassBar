@@ -1224,7 +1224,7 @@ void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuI
 
     // Message loop for modal dialog
     MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0)) {
+    while (IsWindow(hwndDialog) && GetMessageW(&msg, NULL, 0, 0)) {
         if (!IsWindow(hwndDialog)) break;
 
         TranslateMessage(&msg);
@@ -1236,13 +1236,24 @@ void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuI
     if (m_hwndFlyout) EnableWindow(m_hwndFlyout, TRUE);
     SetForegroundWindow(m_hwnd);
 
-    // Retrieve result from dialog data
-    EditContext* pContext = (EditContext*)GetWindowLongPtr(hwndDialog, GWLP_USERDATA);
-    if (pContext && pContext->confirmed && wcslen(pContext->buffer) > 0) {
+    // Retrieve result from dialog data (save it before destroying window)
+    bool confirmed = false;
+    wchar_t resultBuffer[256] = {};
+
+    if (IsWindow(hwndDialog)) {
+        EditContext* pContext = (EditContext*)GetWindowLongPtr(hwndDialog, GWLP_USERDATA);
+        if (pContext) {
+            confirmed = pContext->confirmed;
+            wcscpy_s(resultBuffer, pContext->buffer);
+        }
+        DestroyWindow(hwndDialog);
+    }
+
+    if (confirmed && wcslen(resultBuffer) > 0) {
         if (isSubmenu) {
-            m_customSubmenuNames[itemIndex][submenuIndex] = pContext->buffer;
+            m_customSubmenuNames[itemIndex][submenuIndex] = resultBuffer;
         } else {
-            m_customMenuNames[itemIndex] = pContext->buffer;
+            m_customMenuNames[itemIndex] = resultBuffer;
         }
 
         SaveCustomNames();
@@ -1256,8 +1267,6 @@ void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuI
 
         CF_LOG(Info, "Menu item renamed successfully");
     }
-
-    DestroyWindow(hwndDialog);
 }
 
 const wchar_t* StartMenuWindow::GetTitle() {
@@ -1326,7 +1335,7 @@ void StartMenuWindow::ShowTitleEditDialog() {
     if (m_hwndFlyout) EnableWindow(m_hwndFlyout, FALSE);
 
     MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0)) {
+    while (IsWindow(hwndDialog) && GetMessageW(&msg, NULL, 0, 0)) {
         if (!IsWindow(hwndDialog)) break;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
@@ -1335,15 +1344,25 @@ void StartMenuWindow::ShowTitleEditDialog() {
     EnableWindow(m_hwnd, TRUE);
     if (m_hwndFlyout) EnableWindow(m_hwndFlyout, TRUE);
 
-    EditContext* pContext = (EditContext*)GetWindowLongPtr(hwndDialog, GWLP_USERDATA);
-    if (pContext && pContext->confirmed && wcslen(pContext->buffer) > 0) {
-        m_customTitle = pContext->buffer;
+    // Retrieve result before destroying
+    bool confirmed = false;
+    wchar_t resultBuffer[256] = {};
+
+    if (IsWindow(hwndDialog)) {
+        EditContext* pContext = (EditContext*)GetWindowLongPtr(hwndDialog, GWLP_USERDATA);
+        if (pContext) {
+            confirmed = pContext->confirmed;
+            wcscpy_s(resultBuffer, pContext->buffer);
+        }
+        DestroyWindow(hwndDialog);
+    }
+
+    if (confirmed && wcslen(resultBuffer) > 0) {
+        m_customTitle = resultBuffer;
         SaveCustomNames();
         InvalidateRect(m_hwnd, NULL, TRUE);
         CF_LOG(Info, "Start Menu title renamed");
     }
-
-    DestroyWindow(hwndDialog);
 }
 
 void StartMenuWindow::LoadCustomNames() {
@@ -1506,13 +1525,12 @@ LRESULT CALLBACK StartMenuWindow::EditDialogProc(HWND hwnd, UINT msg, WPARAM wPa
                     pContext->confirmed = true;
                 }
 
+                // Just destroy the window - the modal loop will detect this
                 DestroyWindow(hwnd);
-                PostQuitMessage(0);
                 return 0;
             }
             else if (LOWORD(wParam) == IDCANCEL || LOWORD(wParam) == IDCLOSE) {
                 DestroyWindow(hwnd);
-                PostQuitMessage(0);
                 return 0;
             }
             break;
@@ -1520,11 +1538,10 @@ LRESULT CALLBACK StartMenuWindow::EditDialogProc(HWND hwnd, UINT msg, WPARAM wPa
 
         case WM_CLOSE:
             DestroyWindow(hwnd);
-            PostQuitMessage(0);
             return 0;
 
         case WM_DESTROY:
-            PostQuitMessage(0);
+            // Don't call PostQuitMessage - just let the window be destroyed
             return 0;
     }
 

@@ -12,14 +12,28 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Unpackaged deployment settings -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- Application icon -->
+    <ApplicationIcon>..\assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <Content Include="Assets\**" />
+    <Content Include="..\assets\app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Copy Core DLL to output directory -->
+  <ItemGroup>
+    <None Include="..\Core\build\bin\Release\CrystalFrame.Core.dll"
+          Link="CrystalFrame.Core.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\Core\build\bin\Release\CrystalFrame.Core.dll')" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240627000" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.3233" />
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>

@@ -17,15 +17,27 @@ namespace CrystalFrame.Dashboard
         private const int ShutdownTimeoutMs = 3000;
 
         private readonly IpcClient _ipc;
+        private readonly CoreExtractor _extractor;
+        private readonly ConfigManager _config;
         private Process _coreProcess;
 
         public event EventHandler<bool> CoreRunningChanged;
 
         public bool IsRunning => FindCoreProcess() != null;
 
-        public CoreProcessManager(IpcClient ipc)
+        public CoreProcessManager(IpcClient ipc, ConfigManager config)
         {
             _ipc = ipc;
+            _config = config;
+            _extractor = new CoreExtractor();
+        }
+
+        /// <summary>
+        /// Extracts Core.exe from embedded resources if needed.
+        /// </summary>
+        public async Task<ExtractResult> ExtractCoreAsync()
+        {
+            return await _extractor.EnsureExtractedAsync();
         }
 
         /// <summary>
@@ -176,9 +188,41 @@ namespace CrystalFrame.Dashboard
 
         private string GetCoreExePath()
         {
-            // Core.exe is in the same directory as Dashboard.exe
+            // First try the extracted path from CoreExtractor
+            if (File.Exists(_extractor.CoreExePath))
+            {
+                return _extractor.CoreExePath;
+            }
+
+            // Fallback: Core.exe in the same directory as Dashboard.exe (for development)
             var dashboardDir = AppContext.BaseDirectory;
             return Path.Combine(dashboardDir, CoreExeName);
+        }
+
+        /// <summary>
+        /// Sets whether Core should remain running when Dashboard closes.
+        /// </summary>
+        public void SetCoreEnabledOnClose(bool enabled)
+        {
+            _config.CoreEnabled = enabled;
+        }
+
+        /// <summary>
+        /// Called when Dashboard is closing.
+        /// If CoreEnabled=true, Core continues running.
+        /// If CoreEnabled=false, Core is stopped.
+        /// </summary>
+        public async Task OnDashboardClosingAsync()
+        {
+            if (!_config.CoreEnabled)
+            {
+                Debug.WriteLine("CoreEnabled=false, stopping Core on Dashboard close");
+                await StopCoreAsync();
+            }
+            else
+            {
+                Debug.WriteLine("CoreEnabled=true, Core will continue running in background");
+            }
         }
 
         public void Dispose()

@@ -13,31 +13,51 @@ IpcBridge::~IpcBridge() {
 
 bool IpcBridge::Initialize(IIpcCallback* callback) {
     m_callback = callback;
-    
-    // Create named pipe
-    m_hPipe = CreateNamedPipeW(
-        L"\\\\.\\pipe\\CrystalFrame",
-        PIPE_ACCESS_DUPLEX,  // Bidirectional
-        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-        1,  // Max 1 instance (single Dashboard)
-        4096,  // Out buffer size
-        4096,  // In buffer size
-        0,  // Default timeout
-        nullptr
-    );
-    
-    if (m_hPipe == INVALID_HANDLE_VALUE) {
-        CF_LOG(Error, "CreateNamedPipe failed: " << GetLastError());
-        return false;
+
+    // Retry logic for ERROR_PIPE_BUSY (231) - handles cases where old instance didn't cleanup
+    const int MAX_RETRIES = 3;
+    const int RETRY_DELAY_MS = 1000;
+
+    for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
+        if (attempt > 0) {
+            CF_LOG(Info, "Retrying pipe creation (attempt " << (attempt + 1) << "/" << MAX_RETRIES << ")...");
+            Sleep(RETRY_DELAY_MS);
+        }
+
+        // Create named pipe
+        m_hPipe = CreateNamedPipeW(
+            L"\\\\.\\pipe\\CrystalFrame",
+            PIPE_ACCESS_DUPLEX,  // Bidirectional
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            1,  // Max 1 instance (single Dashboard)
+            4096,  // Out buffer size
+            4096,  // In buffer size
+            0,  // Default timeout
+            nullptr
+        );
+
+        if (m_hPipe != INVALID_HANDLE_VALUE) {
+            CF_LOG(Info, "IPC pipe created successfully, waiting for Dashboard connection...");
+
+            // Start listener thread
+            m_running = true;
+            m_listenerThread = std::thread(&IpcBridge::ListenerThread, this);
+
+            return true;
+        }
+
+        DWORD error = GetLastError();
+        if (error == ERROR_PIPE_BUSY) {
+            CF_LOG(Warning, "Pipe is busy (ERROR_PIPE_BUSY), another Core instance may be running");
+            // Continue retry loop
+        } else {
+            CF_LOG(Error, "CreateNamedPipe failed: " << error);
+            return false;
+        }
     }
-    
-    CF_LOG(Info, "IPC pipe created, waiting for Dashboard connection...");
-    
-    // Start listener thread
-    m_running = true;
-    m_listenerThread = std::thread(&IpcBridge::ListenerThread, this);
-    
-    return true;
+
+    CF_LOG(Error, "Failed to create pipe after " << MAX_RETRIES << " attempts");
+    return false;
 }
 
 void IpcBridge::Shutdown() {
@@ -180,41 +200,35 @@ void IpcBridge::SendMessage(const std::string& json) {
 }
 
 void IpcBridge::SendStatusUpdate(const StatusData& status) {
-    std::ostringstream oss;
-    oss << "{\n";
-    oss << "  \"type\": \"StatusUpdate\",\n";
-    oss << "  \"data\": {\n";
-    oss << "    \"taskbar\": {\n";
-    oss << "      \"found\": " << (status.taskbar.found ? "true" : "false") << ",\n";
-    oss << "      \"edge\": \"" << status.taskbar.edge << "\",\n";
-    oss << "      \"autoHide\": " << (status.taskbar.autoHide ? "true" : "false") << ",\n";
-    oss << "      \"enabled\": " << (status.taskbar.enabled ? "true" : "false") << ",\n";
-    oss << "      \"opacity\": " << status.taskbar.opacity << "\n";
-    oss << "    },\n";
-    oss << "    \"start\": {\n";
-    oss << "      \"detected\": " << (status.start.detected ? "true" : "false") << ",\n";
-    oss << "      \"isOpen\": " << (status.start.isOpen ? "true" : "false") << ",\n";
-    oss << "      \"confidence\": " << status.start.confidence << ",\n";
-    oss << "      \"enabled\": " << (status.start.enabled ? "true" : "false") << ",\n";
-    oss << "      \"opacity\": " << status.start.opacity << "\n";
-    oss << "    }\n";
-    oss << "  }\n";
-    oss << "}\n";
-    
-    SendMessage(oss.str());
+    CF_LOG(Debug, "Sending status: taskbar.found=" << status.taskbar.found
+                  << ", start.detected=" << status.start.detected);
+
+    // Send as single line so Dashboard's ReadLineAsync works correctly
+    std::ostringstream json;
+    json << "{\"type\":\"StatusUpdate\",\"data\":{";
+    json << "\"taskbar\":{";
+    json << "\"found\":" << (status.taskbar.found ? "true" : "false") << ",";
+    json << "\"edge\":\"" << status.taskbar.edge << "\",";
+    json << "\"autoHide\":" << (status.taskbar.autoHide ? "true" : "false") << ",";
+    json << "\"enabled\":" << (status.taskbar.enabled ? "true" : "false") << ",";
+    json << "\"opacity\":" << status.taskbar.opacity << "},";
+    json << "\"start\":{";
+    json << "\"detected\":" << (status.start.detected ? "true" : "false") << ",";
+    json << "\"isOpen\":" << (status.start.isOpen ? "true" : "false") << ",";
+    json << "\"confidence\":" << status.start.confidence << ",";
+    json << "\"enabled\":" << (status.start.enabled ? "true" : "false") << ",";
+    json << "\"opacity\":" << status.start.opacity << "}";
+    json << "}}\n";
+
+    SendMessage(json.str());
 }
 
 void IpcBridge::SendError(const std::string& message, const std::string& code) {
-    std::ostringstream oss;
-    oss << "{\n";
-    oss << "  \"type\": \"Error\",\n";
-    oss << "  \"data\": {\n";
-    oss << "    \"message\": \"" << message << "\",\n";
-    oss << "    \"code\": \"" << code << "\"\n";
-    oss << "  }\n";
-    oss << "}\n";
-    
-    SendMessage(oss.str());
+    // Send as single line so Dashboard's ReadLineAsync works correctly
+    std::ostringstream json;
+    json << "{\"type\":\"Error\",\"data\":{\"message\":\"" << message << "\",\"code\":\"" << code << "\"}}\n";
+
+    SendMessage(json.str());
 }
 
 // Simple JSON parsing helpers (no external dependencies)

@@ -3,6 +3,7 @@
 #include <shlobj.h>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 namespace CrystalFrame {
 

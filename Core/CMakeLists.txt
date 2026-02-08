@@ -47,7 +47,10 @@ if(MSVC)
     target_compile_options(CrystalFrame.Core PRIVATE
         /W4                 # Warning level 4
         /permissive-        # Standards conformance
-        /MP                 # Multi-processor compilation
+        # /MP removed - causes heap errors on some systems
+        /Zm300              # Increase compiler heap size to 300%
+        /bigobj             # Support large object files
+        /d2ReducedOptimizeHugeFunctions  # Reduce optimization for huge functions
     )
 
     # Definitions

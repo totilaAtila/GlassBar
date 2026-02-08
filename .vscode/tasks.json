@@ -134,6 +134,50 @@
             "problemMatcher": []
         },
         {
+            "label": "🌟 Publish COMPLETE Standalone (ZERO Dependencies)",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/.vscode/publish-prompt.ps1",
+                "-ScriptPath",
+                "${workspaceFolder}/publish-standalone-full.ps1"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true,
+                "echo": true,
+                "showReuseMessage": false,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "⚡ Quick Publish Standalone (NO Rebuild)",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/.vscode/publish-prompt.ps1",
+                "-ScriptPath",
+                "${workspaceFolder}/publish-standalone-quick.ps1"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true,
+                "echo": true,
+                "showReuseMessage": false,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "🎯 Quick Publish (1.0.0)",
             "type": "shell",
             "command": "powershell",

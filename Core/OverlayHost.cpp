@@ -171,6 +171,10 @@ void OverlayHost::HideStartOverlay() {
 
 LRESULT CALLBACK OverlayHost::OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_NCHITTEST:
+            // Allow all mouse input to pass through to windows underneath
+            return HTTRANSPARENT;
+
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(hwnd, &ps);
@@ -178,10 +182,10 @@ LRESULT CALLBACK OverlayHost::OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam,
             EndPaint(hwnd, &ps);
             return 0;
         }
-        
+
         case WM_DESTROY:
             return 0;
-            
+
         default:
             return DefWindowProcW(hwnd, msg, wParam, lParam);
     }

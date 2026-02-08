@@ -422,13 +422,14 @@ namespace CrystalFrame.Dashboard
             {
                 Debug.WriteLine("CoreEnabled=false, shutting down Core");
                 _core.Shutdown();
+                _core.Dispose();
             }
             else
             {
                 Debug.WriteLine("CoreEnabled=true, leaving Core running in background");
+                // Do NOT dispose - Core stays active in background
             }
 
-            _core.Dispose();
             await Task.CompletedTask;
         }
 

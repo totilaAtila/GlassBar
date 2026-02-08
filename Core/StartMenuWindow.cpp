@@ -1128,6 +1128,8 @@ const wchar_t* StartMenuWindow::GetSubmenuItemName(int mainIndex, int subIndex) 
 }
 
 void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuIndex) {
+    CF_LOG(Info, "ShowEditDialog called - itemIndex=" << itemIndex << ", isSubmenu=" << isSubmenu << ", submenuIndex=" << submenuIndex);
+
     wchar_t buffer[256] = {};
 
     // Get current name
@@ -1136,6 +1138,8 @@ void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuI
     } else {
         wcscpy_s(buffer, GetMenuItemName(itemIndex));
     }
+
+    CF_LOG(Info, "Current name retrieved, length: " << wcslen(buffer));
 
     // Store context in dialog data structure
     struct EditContext {
@@ -1156,6 +1160,7 @@ void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuI
     context.pThis = this;
 
     // Create modal dialog window with proper class
+    CF_LOG(Info, "Creating edit dialog window...");
     HWND hwndDialog = CreateWindowExW(
         WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
         EDIT_DIALOG_CLASS,
@@ -1172,6 +1177,8 @@ void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuI
         CF_LOG(Error, "Failed to create edit dialog: " << GetLastError());
         return;
     }
+
+    CF_LOG(Info, "Edit dialog window created successfully - HWND: " << hwndDialog);
 
     // Center dialog on screen
     RECT dialogRect;
@@ -1236,36 +1243,22 @@ void StartMenuWindow::ShowEditDialog(int itemIndex, bool isSubmenu, int submenuI
     if (m_hwndFlyout) EnableWindow(m_hwndFlyout, TRUE);
     SetForegroundWindow(m_hwnd);
 
-    // Retrieve result from dialog data (save it before destroying window)
-    bool confirmed = false;
-    wchar_t resultBuffer[256] = {};
-
+    // Cleanup window if still exists
     if (IsWindow(hwndDialog)) {
-        EditContext* pContext = (EditContext*)GetWindowLongPtr(hwndDialog, GWLP_USERDATA);
-        if (pContext) {
-            confirmed = pContext->confirmed;
-            wcscpy_s(resultBuffer, pContext->buffer);
-        }
         DestroyWindow(hwndDialog);
     }
 
-    if (confirmed && wcslen(resultBuffer) > 0) {
+    // Use the local context variable directly (it's still valid!)
+    if (context.confirmed && wcslen(context.buffer) > 0) {
         if (isSubmenu) {
-            m_customSubmenuNames[itemIndex][submenuIndex] = resultBuffer;
+            m_customSubmenuNames[itemIndex][submenuIndex] = context.buffer;
         } else {
-            m_customMenuNames[itemIndex] = resultBuffer;
+            m_customMenuNames[itemIndex] = context.buffer;
         }
 
         SaveCustomNames();
 
-        // Refresh display
-        if (isSubmenu && m_flyoutVisible) {
-            InvalidateRect(m_hwndFlyout, NULL, TRUE);
-        } else {
-            InvalidateRect(m_hwnd, NULL, TRUE);
-        }
-
-        CF_LOG(Info, "Menu item renamed successfully");
+        CF_LOG(Info, "Menu item renamed successfully - changes saved to JSON, will appear on next open");
     }
 }
 
@@ -1344,24 +1337,17 @@ void StartMenuWindow::ShowTitleEditDialog() {
     EnableWindow(m_hwnd, TRUE);
     if (m_hwndFlyout) EnableWindow(m_hwndFlyout, TRUE);
 
-    // Retrieve result before destroying
-    bool confirmed = false;
-    wchar_t resultBuffer[256] = {};
-
+    // Cleanup window if still exists
     if (IsWindow(hwndDialog)) {
-        EditContext* pContext = (EditContext*)GetWindowLongPtr(hwndDialog, GWLP_USERDATA);
-        if (pContext) {
-            confirmed = pContext->confirmed;
-            wcscpy_s(resultBuffer, pContext->buffer);
-        }
         DestroyWindow(hwndDialog);
     }
 
-    if (confirmed && wcslen(resultBuffer) > 0) {
-        m_customTitle = resultBuffer;
+    // Use the local context variable directly
+    if (context.confirmed && wcslen(context.buffer) > 0) {
+        m_customTitle = context.buffer;
         SaveCustomNames();
-        InvalidateRect(m_hwnd, NULL, TRUE);
-        CF_LOG(Info, "Start Menu title renamed");
+
+        CF_LOG(Info, "Start Menu title renamed - saved to JSON, will appear on next open");
     }
 }
 
@@ -1523,14 +1509,17 @@ LRESULT CALLBACK StartMenuWindow::EditDialogProc(HWND hwnd, UINT msg, WPARAM wPa
                     EditContext* pContext = (EditContext*)pData;
                     GetWindowTextW(hwndEdit, pContext->buffer, 256);
                     pContext->confirmed = true;
+
+                    CF_LOG(Info, "Edit dialog OK - text retrieved, confirmed=true");
                 }
 
-                // Just destroy the window - the modal loop will detect this
                 DestroyWindow(hwnd);
+                PostQuitMessage(0);  // Exit the modal message loop
                 return 0;
             }
             else if (LOWORD(wParam) == IDCANCEL || LOWORD(wParam) == IDCLOSE) {
                 DestroyWindow(hwnd);
+                PostQuitMessage(0);  // Exit the modal message loop
                 return 0;
             }
             break;
@@ -1538,10 +1527,11 @@ LRESULT CALLBACK StartMenuWindow::EditDialogProc(HWND hwnd, UINT msg, WPARAM wPa
 
         case WM_CLOSE:
             DestroyWindow(hwnd);
+            PostQuitMessage(0);  // Exit the modal message loop
             return 0;
 
         case WM_DESTROY:
-            // Don't call PostQuitMessage - just let the window be destroyed
+            // PostQuitMessage is called explicitly in WM_COMMAND/WM_CLOSE
             return 0;
     }
 

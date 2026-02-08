@@ -179,11 +179,41 @@ LRESULT CALLBACK StartMenuHook::KeyboardHookProc(int nCode, WPARAM wParam, LPARA
 
 LRESULT CALLBACK StartMenuHook::MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && s_instance && s_instance->m_enabled) {
-        if (wParam == WM_LBUTTONDOWN) {
-            MSLLHOOKSTRUCT* mouse = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
-            POINT pt = mouse->pt;
+        MSLLHOOKSTRUCT* mouse = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        POINT pt = mouse->pt;
 
-            // Check if menu is visible
+        // Check if click is on Start button - suppress ALL mouse events on it
+        bool isOnStartButton = s_instance->IsClickOnStartButton(pt);
+
+        if (isOnStartButton) {
+            CF_LOG(Debug, "Click detected on Start button area - suppressing");
+
+            // Handle only left button down to toggle menu
+            if (wParam == WM_LBUTTONDOWN) {
+                CF_LOG(Debug, "Start button left-click at (" << pt.x << ", " << pt.y << ")");
+
+                // Check if menu is visible
+                bool menuVisible = s_instance->m_isMenuVisibleCallback && s_instance->m_isMenuVisibleCallback();
+
+                // Toggle menu: if visible, hide it; if hidden, show it
+                if (menuVisible) {
+                    CF_LOG(Debug, "Menu already visible - hiding");
+                    if (s_instance->m_hideMenuCallback) {
+                        s_instance->m_hideMenuCallback();
+                    }
+                } else {
+                    CF_LOG(Debug, "Menu not visible - showing");
+                    s_instance->ShowStartMenu(pt.x, pt.y);
+                }
+            }
+
+            // ALWAYS suppress ALL clicks on Start button (down, up, double-click)
+            // This prevents Windows from processing the Start button click
+            return 1;
+        }
+
+        // Handle clicks when menu is visible (not on Start button)
+        if (wParam == WM_LBUTTONDOWN) {
             bool menuVisible = s_instance->m_isMenuVisibleCallback && s_instance->m_isMenuVisibleCallback();
 
             if (menuVisible) {
@@ -202,24 +232,6 @@ LRESULT CALLBACK StartMenuHook::MouseHookProc(int nCode, WPARAM wParam, LPARAM l
                     // Don't suppress the click - let it propagate
                     return CallNextHookEx(NULL, nCode, wParam, lParam);
                 }
-            }
-
-            // Check if click is on Start button
-            if (s_instance->IsClickOnStartButton(pt)) {
-                CF_LOG(Debug, "Start button clicked at (" << pt.x << ", " << pt.y << ")");
-
-                // Toggle menu: if visible, hide it; if hidden, show it
-                if (menuVisible) {
-                    CF_LOG(Debug, "Menu already visible - hiding");
-                    if (s_instance->m_hideMenuCallback) {
-                        s_instance->m_hideMenuCallback();
-                    }
-                } else {
-                    s_instance->ShowStartMenu(pt.x, pt.y);
-                }
-
-                // Suppress the click - don't pass to Windows
-                return 1;
             }
         }
     }

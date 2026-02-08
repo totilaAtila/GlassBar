@@ -37,7 +37,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(Select-String -Pattern \"error|warning C4\")"
+      "Bash(Select-String -Pattern \"error|warning C4\")",
+      "Bash(Start-Process -FilePath \".\\\\Dashboard\\\\bin\\\\x64\\\\Release\\\\net8.0-windows10.0.22621.0\\\\CrystalFrame.Dashboard.exe\" -WorkingDirectory \".\\\\Dashboard\\\\bin\\\\x64\\\\Release\\\\net8.0-windows10.0.22621.0\")"
     ]
   }
 }

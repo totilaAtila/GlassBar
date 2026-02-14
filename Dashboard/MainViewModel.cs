@@ -193,6 +193,17 @@ namespace CrystalFrame.Dashboard
             set => SetProperty(ref _extractionError, value);
         }
 
+        private bool _runAtStartup;
+        public bool RunAtStartup
+        {
+            get => _runAtStartup;
+            set
+            {
+                if (SetProperty(ref _runAtStartup, value))
+                    StartupManager.SetEnabled(value);
+            }
+        }
+
         // Methods
         public async Task<bool> InitializeAsync()
         {
@@ -227,6 +238,10 @@ namespace CrystalFrame.Dashboard
                 StartShowPictures = _config.StartShowPictures;
                 StartShowVideos = _config.StartShowVideos;
                 StartShowRecentFiles = _config.StartShowRecentFiles;
+
+                // Read startup state from registry (not stored in config.json)
+                _runAtStartup = StartupManager.IsEnabled();
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(RunAtStartup)));
 
                 // Initialize Core engine (native DLL)
                 bool success = _core.Initialize();

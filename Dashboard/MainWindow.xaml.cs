@@ -25,7 +25,7 @@ namespace CrystalFrame.Dashboard
             var hwnd = WindowNative.GetWindowHandle(this);
             var windowId = Win32Interop.GetWindowIdFromWindow(hwnd);
             var appWindow = AppWindow.GetFromWindowId(windowId);
-            appWindow.Resize(new SizeInt32(500, 600));
+            appWindow.Resize(new SizeInt32(480, 530));
 
             // Set window icon
             var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "app.ico");
@@ -95,6 +95,8 @@ namespace CrystalFrame.Dashboard
                     StartShowPictures.IsChecked = _viewModel.StartShowPictures;
                     StartShowVideos.IsChecked = _viewModel.StartShowVideos;
                     StartShowRecentFiles.IsChecked = _viewModel.StartShowRecentFiles;
+
+                    RunAtStartupToggle.IsOn = _viewModel.RunAtStartup;
 
                     UpdateOpacityText();
                     UpdateStatus();
@@ -187,17 +189,10 @@ namespace CrystalFrame.Dashboard
 
         private async void TaskbarEnabled_Toggled(object sender, RoutedEventArgs e)
         {
-            Debug.WriteLine($"[UI] TaskbarEnabled_Toggled fired: value={TaskbarEnabledToggle.IsOn}, _isInitialized={_isInitialized}");
-
-            if (!_isInitialized)
-            {
-                Debug.WriteLine("[UI] Skipping because _isInitialized=false");
-                return;
-            }
+            if (!_isInitialized) return;
 
             try
             {
-                Debug.WriteLine($"[UI] Calling ViewModel.SetTaskbarEnabledAsync({TaskbarEnabledToggle.IsOn})");
                 await _viewModel.SetTaskbarEnabledAsync(TaskbarEnabledToggle.IsOn);
             }
             catch (Exception ex)
@@ -206,32 +201,26 @@ namespace CrystalFrame.Dashboard
             }
         }
 
+        private void RunAtStartup_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (!_isInitialized) return;
+            _viewModel.RunAtStartup = RunAtStartupToggle.IsOn;
+        }
+
         private void TaskbarOpacity_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
         {
-            Debug.WriteLine($"[UI] TaskbarOpacity_ValueChanged fired: value={e.NewValue}, _isInitialized={_isInitialized}");
-
-            // Update text display always, even during initialization
             int value = (int)e.NewValue;
             TaskbarOpacityValue.Text = value.ToString();
 
-            if (!_isInitialized)
-            {
-                Debug.WriteLine("[UI] Skipping IPC because _isInitialized=false");
-                DebugStatusText.Text = $"[SKIP] _isInitialized=false";
-                return;
-            }
-
-            DebugStatusText.Text = $"[SLIDER] Sending opacity={value}, init={_isInitialized}";
-            Debug.WriteLine($"[UI] Calling ViewModel.OnTaskbarOpacityChanged({value})");
+            if (!_isInitialized) return;
 
             try
             {
                 _viewModel.OnTaskbarOpacityChanged(value);
-                DebugStatusText.Text = $"[OK] Sent opacity={value}";
             }
             catch (Exception ex)
             {
-                DebugStatusText.Text = $"[ERROR] {ex.Message}";
+                Debug.WriteLine($"[UI] TaskbarOpacity error: {ex.Message}");
             }
         }
 

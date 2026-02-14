@@ -680,7 +680,7 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         default:
-            return DefWindowProc(m_hwnd, msg, wParam, lParam);
+            return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 }
 
@@ -1514,12 +1514,11 @@ LRESULT CALLBACK StartMenuWindow::EditDialogProc(HWND hwnd, UINT msg, WPARAM wPa
                 }
 
                 DestroyWindow(hwnd);
-                PostQuitMessage(0);  // Exit the modal message loop
+                // No PostQuitMessage - the modal loop exits when IsWindow(hwndDialog) becomes false
                 return 0;
             }
             else if (LOWORD(wParam) == IDCANCEL || LOWORD(wParam) == IDCLOSE) {
                 DestroyWindow(hwnd);
-                PostQuitMessage(0);  // Exit the modal message loop
                 return 0;
             }
             break;
@@ -1527,11 +1526,9 @@ LRESULT CALLBACK StartMenuWindow::EditDialogProc(HWND hwnd, UINT msg, WPARAM wPa
 
         case WM_CLOSE:
             DestroyWindow(hwnd);
-            PostQuitMessage(0);  // Exit the modal message loop
             return 0;
 
         case WM_DESTROY:
-            // PostQuitMessage is called explicitly in WM_COMMAND/WM_CLOSE
             return 0;
     }
 

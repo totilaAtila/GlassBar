@@ -219,17 +219,19 @@ LRESULT CALLBACK ShellTargetLocator::StaticWndProc(HWND hwnd, UINT msg, WPARAM w
 LRESULT ShellTargetLocator::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     // Handle TaskbarCreated (Explorer restart)
     if (msg == m_taskbarCreatedMsg) {
-        CF_LOG(Warning, "Explorer restarted - re-detecting taskbar");
-        
-        // Wait briefly for shell to stabilize
-        Sleep(500);
-        
-        // Re-detect taskbar
-        DetectTaskbar();
-        
+        CF_LOG(Warning, "Explorer restarted - scheduling taskbar re-detection");
+        // Use a one-shot timer instead of Sleep() so we don't block the message pump
+        SetTimer(hwnd, 1, 500, nullptr);
         return 0;
     }
-    
+
+    if (msg == WM_TIMER && wParam == 1) {
+        KillTimer(hwnd, 1);
+        CF_LOG(Info, "Re-detecting taskbar after Explorer restart");
+        DetectTaskbar();
+        return 0;
+    }
+
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
@@ -248,38 +250,43 @@ void ShellTargetLocator::MonitorStart() {
         
         StartInfo newState = DetectStart();
         
-        // Check for state change
-        bool stateChanged = (newState.isOpen != lastState.isOpen);
+        // For state tracking, treat low-confidence detections as "not open"
+        // to avoid swallowing events in a false-positive gap
+        bool effectivelyOpen = newState.isOpen && newState.confidence >= 0.4f;
+        bool stateChanged = (effectivelyOpen != lastState.isOpen);
 
         if (stateChanged) {
-            if (newState.isOpen && newState.confidence >= 0.4f) {
+            if (effectivelyOpen) {
                 // Start opened
                 CF_LOG(Info, "Start menu opened (confidence: " << newState.confidence << ")");
-                
+
                 {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     m_startInfo = newState;
                     m_lowConfidenceCount = 0;
                 }
-                
+
                 if (m_callback) {
                     m_callback->OnStartShown(newState);
                 }
             }
-            else if (!newState.isOpen && lastState.isOpen) {
+            else if (!effectivelyOpen && lastState.isOpen) {
                 // Start closed
                 CF_LOG(Info, "Start menu closed");
-                
+
                 {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     m_startInfo.isOpen = false;
                 }
-                
+
                 if (m_callback) {
                     m_callback->OnStartHidden();
                 }
             }
         }
+
+        // Use effectivelyOpen for lastState so tracking stays consistent
+        lastState.isOpen = effectivelyOpen;
         
         // Check for low confidence
         if (newState.isOpen && newState.confidence < 0.6f) {
@@ -298,8 +305,12 @@ void ShellTargetLocator::MonitorStart() {
             m_lowConfidenceCount = 0;
         }
         
-        lastState = newState;
-        
+        // Update other lastState fields (isOpen was already set above based on effectivelyOpen)
+        lastState.hwnd = newState.hwnd;
+        lastState.rect = newState.rect;
+        lastState.confidence = newState.confidence;
+        lastState.detected = newState.detected;
+
         // Poll every 250ms
         Sleep(250);
     }

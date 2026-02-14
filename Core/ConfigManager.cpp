@@ -54,7 +54,8 @@ bool ConfigManager::Load() {
             if (pos != std::string::npos) {
                 std::string value = line.substr(pos + 1);
                 value.erase(std::remove(value.begin(), value.end(), ','), value.end());
-                m_config.taskbarOpacity = std::stoi(value);
+                try { m_config.taskbarOpacity = std::clamp(std::stoi(value), 0, 100); }
+                catch (const std::exception&) { CF_LOG(Warning, "Invalid taskbarOpacity in config, using default"); }
             }
         }
         else if (line.find("\"startOpacity\":") != std::string::npos) {
@@ -62,7 +63,8 @@ bool ConfigManager::Load() {
             if (pos != std::string::npos) {
                 std::string value = line.substr(pos + 1);
                 value.erase(std::remove(value.begin(), value.end(), ','), value.end());
-                m_config.startOpacity = std::stoi(value);
+                try { m_config.startOpacity = std::clamp(std::stoi(value), 0, 100); }
+                catch (const std::exception&) { CF_LOG(Warning, "Invalid startOpacity in config, using default"); }
             }
         }
         else if (line.find("\"taskbarEnabled\":") != std::string::npos) {

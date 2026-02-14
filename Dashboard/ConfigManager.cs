@@ -44,7 +44,7 @@ namespace CrystalFrame.Dashboard
     public class ConfigManager
     {
         private readonly string _configPath;
-        private Config _config;
+        private Config _config = new Config();
         private readonly DebounceTimer _saveDebounce;
 
         public ConfigManager()
@@ -180,9 +180,10 @@ namespace CrystalFrame.Dashboard
             }
         }
 
-        public async Task SaveAsync()
+        public Task SaveAsync()
         {
             _saveDebounce.Trigger();
+            return Task.CompletedTask;
         }
 
         private async Task SaveNowAsync()

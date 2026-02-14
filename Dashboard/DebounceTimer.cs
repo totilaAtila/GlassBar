@@ -18,9 +18,11 @@ namespace CrystalFrame.Dashboard
 
         public void Trigger()
         {
-            // Cancel previous timer
-            _cts?.Cancel();
+            // Cancel and dispose previous timer
+            var oldCts = _cts;
             _cts = new CancellationTokenSource();
+            oldCts?.Cancel();
+            oldCts?.Dispose();
 
             var token = _cts.Token;
 

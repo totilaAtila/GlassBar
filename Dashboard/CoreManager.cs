@@ -12,7 +12,8 @@ namespace CrystalFrame.Dashboard
     public class CoreManager : IDisposable
     {
         private Thread? _messageThread;
-        private bool _running;
+        private volatile bool _running;
+        private bool _disposed;
 
         public event EventHandler<bool>? CoreRunningChanged;
         public event EventHandler<CoreNative.CoreStatus>? StatusUpdated;
@@ -24,6 +25,12 @@ namespace CrystalFrame.Dashboard
         /// </summary>
         public bool Initialize()
         {
+            if (_running)
+            {
+                Debug.WriteLine("[CoreManager] Already initialized");
+                return true;
+            }
+
             try
             {
                 Debug.WriteLine("[CoreManager] Initializing Core engine...");
@@ -71,7 +78,11 @@ namespace CrystalFrame.Dashboard
             // Wait for message thread to exit
             if (_messageThread != null && _messageThread.IsAlive)
             {
-                _messageThread.Join(2000);
+                bool joined = _messageThread.Join(2000);
+                if (!joined)
+                {
+                    Debug.WriteLine("[CoreManager] Message thread did not exit in time, forcing shutdown");
+                }
             }
 
             CoreNative.CoreShutdown();
@@ -252,13 +263,24 @@ namespace CrystalFrame.Dashboard
                 Debug.WriteLine($"[CoreManager] Message pump exception: {ex.Message}");
             }
 
-            _running = false;
+            // If the thread exited on its own (CoreProcessMessages returned false),
+            // we must still call CoreShutdown to clean up the native engine.
+            if (_running)
+            {
+                _running = false;
+                CoreNative.CoreShutdown();
+                CoreRunningChanged?.Invoke(this, false);
+            }
+
             Debug.WriteLine("[CoreManager] Message pump thread exited");
         }
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
             Shutdown();
+            GC.SuppressFinalize(this);
         }
     }
 }

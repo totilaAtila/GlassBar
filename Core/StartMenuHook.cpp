@@ -136,6 +136,13 @@ LRESULT CALLBACK StartMenuHook::KeyboardHookProc(int nCode, WPARAM wParam, LPARA
     if (nCode == HC_ACTION && s_instance && s_instance->m_enabled) {
         KBDLLHOOKSTRUCT* kbd = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
 
+        // Suppress Windows key KEYUP too - without this, the native Start opens on key release
+        if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
+            if (kbd->vkCode == VK_LWIN || kbd->vkCode == VK_RWIN) {
+                return 1; // Suppress Windows key up
+            }
+        }
+
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
             // Check for ESC key when menu is visible
             if (kbd->vkCode == VK_ESCAPE) {
@@ -168,7 +175,7 @@ LRESULT CALLBACK StartMenuHook::KeyboardHookProc(int nCode, WPARAM wParam, LPARA
 
                 s_instance->ShowStartMenu(x, y);
 
-                // Suppress the Windows key - don't pass to Windows
+                // Suppress Windows key down - don't pass to Windows
                 return 1;
             }
         }

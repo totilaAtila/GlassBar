@@ -94,9 +94,9 @@ bool Core::Initialize() {
         return false;
     }
 
-    // Create refresh timer
-    UINT_PTR timerId = SetTimer(nullptr, 0, REFRESH_INTERVAL_MS, nullptr);
-    CF_LOG(Info, "Refresh timer created with ID: " << timerId);
+    // Create refresh timer (store ID so it can be killed in Shutdown)
+    m_timerId = SetTimer(nullptr, 0, REFRESH_INTERVAL_MS, nullptr);
+    CF_LOG(Info, "Refresh timer created with ID: " << m_timerId);
 
     CF_LOG(Info, "=== CrystalFrame Core Ready ===");
 
@@ -118,8 +118,10 @@ bool Core::ProcessMessages() {
             return false;
         }
 
-        if (msg.message == WM_TIMER) {
+        if (msg.message == WM_TIMER && msg.hwnd == nullptr) {
+            // Thread timer (no window) - handle manually, skip DispatchMessage
             RefreshTransparency();
+            continue;
         }
 
         TranslateMessage(&msg);
@@ -130,31 +132,26 @@ bool Core::ProcessMessages() {
 }
 
 void Core::Shutdown() {
+    if (!m_running && !m_timerId) {
+        return; // Already shut down
+    }
+
     CF_LOG(Info, "Core shutdown initiated");
 
     m_running = false;
 
-    if (m_startMenuWindow) {
-        m_startMenuWindow->Shutdown();
+    // Kill the refresh timer first
+    if (m_timerId) {
+        KillTimer(nullptr, m_timerId);
+        m_timerId = 0;
     }
 
-    if (m_startMenuHook) {
-        m_startMenuHook->Shutdown();
-    }
-
-    if (m_locator) {
-        m_locator->Shutdown();
-    }
-
-    if (m_renderer) {
-        m_renderer->Shutdown();
-    }
-
-    m_config.reset();
+    // Reset all modules - destructors call their own Shutdown()
+    m_startMenuWindow.reset();
+    m_startMenuHook.reset();
     m_locator.reset();
     m_renderer.reset();
-    m_startMenuHook.reset();
-    m_startMenuWindow.reset();
+    m_config.reset();
 
     CF_LOG(Info, "Core shutdown complete");
 }

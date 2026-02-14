@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using Microsoft.UI.Dispatching;
 
 namespace CrystalFrame.Dashboard
 {
@@ -10,11 +11,13 @@ namespace CrystalFrame.Dashboard
     {
         private readonly CoreManager _core;
         private readonly ConfigManager _config;
+        private readonly DispatcherQueue? _dispatcherQueue;
 
         public MainViewModel()
         {
             _core = new CoreManager();
             _config = new ConfigManager();
+            _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
 
             _core.CoreRunningChanged += OnCoreRunningChanged;
             _core.StatusUpdated += OnStatusUpdated;
@@ -132,14 +135,14 @@ namespace CrystalFrame.Dashboard
         public bool TaskbarEnabled
         {
             get => _taskbarEnabled;
-            set => SetProperty(ref _taskbarEnabled, value);
+            set { if (SetProperty(ref _taskbarEnabled, value)) _config.TaskbarEnabled = value; }
         }
 
         private bool _startEnabled;
         public bool StartEnabled
         {
             get => _startEnabled;
-            set => SetProperty(ref _startEnabled, value);
+            set { if (SetProperty(ref _startEnabled, value)) _config.StartEnabled = value; }
         }
 
         private bool _taskbarFound;
@@ -277,6 +280,12 @@ namespace CrystalFrame.Dashboard
 
             if (running)
             {
+                // Ensure any previous instance is stopped before re-initializing
+                if (_core.IsRunning)
+                {
+                    _core.Shutdown();
+                }
+
                 bool success = _core.Initialize();
                 CoreRunning = success;
 
@@ -317,18 +326,18 @@ namespace CrystalFrame.Dashboard
             }
         }
 
-        public async Task SetTaskbarEnabledAsync(bool enabled)
+        public Task SetTaskbarEnabledAsync(bool enabled)
         {
             TaskbarEnabled = enabled;
             _core.SetTaskbarEnabled(enabled);
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
-        public async Task SetStartEnabledAsync(bool enabled)
+        public Task SetStartEnabledAsync(bool enabled)
         {
             StartEnabled = enabled;
             _core.SetStartEnabled(enabled);
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
         public void OnTaskbarOpacityChanged(int value)
@@ -402,9 +411,12 @@ namespace CrystalFrame.Dashboard
 
         private void OnStatusUpdated(object sender, CoreNative.CoreStatus status)
         {
-            // Update UI properties from Core status
-            TaskbarFound = status.Taskbar.Found;
-            StartDetected = status.Start.Detected;
+            // Status is updated from background thread - dispatch to UI thread
+            _dispatcherQueue?.TryEnqueue(() =>
+            {
+                TaskbarFound = status.Taskbar.Found;
+                StartDetected = status.Start.Detected;
+            });
         }
 
         private void OnCoreRunningChanged(object sender, bool running)
@@ -421,8 +433,7 @@ namespace CrystalFrame.Dashboard
             if (!CoreEnabled)
             {
                 Debug.WriteLine("CoreEnabled=false, shutting down Core");
-                _core.Shutdown();
-                _core.Dispose();
+                _core.Dispose(); // Dispose calls Shutdown internally
             }
             else
             {

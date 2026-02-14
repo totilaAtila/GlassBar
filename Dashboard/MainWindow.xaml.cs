@@ -251,10 +251,10 @@ namespace CrystalFrame.Dashboard
 
         private void StartOpacity_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
         {
-            if (!_isInitialized) return;
-
             int value = (int)e.NewValue;
             StartOpacityValue.Text = value.ToString();
+
+            if (!_isInitialized) return;
 
             _viewModel.OnStartOpacityChanged(value);
         }

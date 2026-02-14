@@ -214,9 +214,12 @@ LRESULT CALLBACK StartMenuHook::MouseHookProc(int nCode, WPARAM wParam, LPARAM l
                 }
             }
 
-            // ALWAYS suppress ALL clicks on Start button (down, up, double-click)
-            // This prevents Windows from processing the Start button click
-            return 1;
+            // Suppress click events on Start button, but NOT WM_MOUSEMOVE.
+            // Suppressing WM_MOUSEMOVE in a low-level hook freezes the cursor at
+            // the Start button boundary, which is the bug the user reported.
+            if (wParam != WM_MOUSEMOVE) {
+                return 1;
+            }
         }
 
         // Handle clicks when menu is visible (not on Start button)

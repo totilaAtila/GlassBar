@@ -1,213 +1,179 @@
-# CrystalFrame Engine
+# CrystalFrame
 
-**Windows 11 Overlay Utility** - Apply customizable transparent overlays over Taskbar and Start Menu without modifying system files.
+**Windows 11 Overlay Utility** — Transparent, color-customizable overlays for the Taskbar and Start Menu without modifying system files.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.1-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Build](https://github.com/totilaAtila/Win7-Revival/actions/workflows/build.yml/badge.svg)
 
 ---
 
-## 🎯 Features
+## Features
 
-- ✅ **Taskbar Overlay** - Semi-transparent overlay over Windows 11 Taskbar
-- ✅ **Start Menu Overlay** - Overlay appears only when Start Menu is open
-- ✅ **Opacity Control** - 0-100% adjustable opacity via sliders
-- ✅ **Auto-Hide Support** - Detects and tracks auto-hide taskbar
-- ✅ **All Edges** - Works with taskbar on bottom, top, left, or right
-- ✅ **Click-Through** - Full taskbar/start functionality preserved
-- ✅ **Explorer Restart Recovery** - Automatically re-detects after Explorer crashes
-- ✅ **Performance Optimized** - CPU usage < 2% idle
-- ✅ **No Injection** - External overlay only, no system modifications
+- **Taskbar Overlay** — Semi-transparent color overlay over the Windows 11 Taskbar
+- **Start Menu Overlay** — Overlay activates only when the Start Menu is open
+- **RGB Color Control** — Independent R/G/B sliders for background and text color per panel
+- **Opacity Control** — 0–100% adjustable per panel
+- **Enable/Disable per panel** — Toggle Taskbar and Start Menu overlays independently
+- **Run at Startup** — Optional auto-start via Windows registry
+- **System Theme Support** — Follows Windows light/dark theme automatically
+- **Click-Through** — Full Taskbar and Start Menu functionality preserved
+- **Explorer Restart Recovery** — Auto re-detects Taskbar/Start after Explorer crashes
+- **No Injection** — External overlay only; no system file modifications
 
 ---
 
-## 📁 Architecture
+## Architecture
 
-### Components
+```
+CrystalFrame.Dashboard.exe  (C# .NET 8, WinUI 3)
+        │  P/Invoke (direct calls)
+        ▼
+CrystalFrame.Core.dll  (C++20, Win32)
+```
 
-**CrystalFrame.Core** (C++20)
-- DirectComposition rendering
-- Shell target detection (Taskbar/Start)
-- Overlay window management
-- IPC server (Named Pipes)
-- Configuration persistence
+**CrystalFrame.Core** — Native DLL (C++20)
+- DirectComposition rendering (hardware-accelerated)
+- Shell target detection (Taskbar / Start Menu via UI Automation)
+- Overlay window management (click-through, layered)
+- Configuration persistence (`%LOCALAPPDATA%\CrystalFrame\config.json`)
+- Explorer restart recovery (WinEvent hook)
 
-**CrystalFrame.Dashboard** (C# .NET 8, WinUI 3)
-- Settings UI (sliders, toggles)
-- IPC client
-- Real-time status display
-- Config management
+**CrystalFrame.Dashboard** — Settings UI (C# .NET 8, WinUI 3)
+- Compact main window: Core on/off toggle, Run at Startup, panel navigation
+- Separate DetailWindow per panel (Taskbar / Start Menu settings)
+- Dynamic window sizing (SizeToContent via `UIElement.Measure`)
+- Real-time status indicators
 
 ### Technology Stack
 
-- **Core:** C++20, DirectComposition, Direct2D, Win32 API
-- **Dashboard:** .NET 8, WinUI 3, XAML
-- **IPC:** Named Pipes (JSON messages)
-- **Build:** CMake (Core), dotnet CLI (Dashboard)
+| Layer | Technology |
+|-------|-----------|
+| Core engine | C++20, DirectComposition, Direct2D, Win32 API |
+| Dashboard UI | C# .NET 8, WinUI 3, XAML |
+| Core↔Dashboard | P/Invoke (direct DLL calls, no IPC) |
+| Build | CMake (Core), dotnet CLI / MSBuild (Dashboard) |
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
-- **Windows 11** (22H2 or later)
-- **Visual Studio 2022** (for C++ compiler)
+- **Windows 11** (22H2 or later recommended)
+- **Visual Studio 2022** with C++ Desktop workload (for Core)
 - **.NET 8 SDK**
-- **CMake** (3.20+)
+- **CMake 3.20+**
 
 ### Build
-
-See `docs/BUILD.md` for detailed build instructions.
 
 **Core (C++):**
 ```cmd
 cd Core
-mkdir build && cd build
-cmake ..
-cmake --build . --config Release
+cmake -B build -A x64
+cmake --build build --config Release
 ```
 
 **Dashboard (C#):**
 ```cmd
 cd Dashboard
-dotnet build --configuration Release
+dotnet build -p:Platform=x64 --configuration Release
 ```
 
 ### Run
 
-1. **Start Core:**
-   ```cmd
-   Core/build/bin/Release/CrystalFrame.Core.exe
-   ```
+```cmd
+Dashboard\bin\x64\Release\net8.0-windows10.0.22621.0\CrystalFrame.Dashboard.exe
+```
 
-2. **Start Dashboard:**
-   ```cmd
-   Dashboard/bin/Release/net8.0-windows/CrystalFrame.Dashboard.exe
-   ```
-
-3. **Adjust opacity sliders** - Changes apply in real-time!
+The Dashboard automatically locates and loads `CrystalFrame.Core.dll` from the same directory.
+Click **Core Engine** toggle → ON to start the overlay engine.
 
 ---
 
-## 📖 Documentation
+## Usage
 
-- **[VSCode Setup Guide](docs/VSCODE-SETUP.md)** - Complete setup for Visual Studio Code
-- **[Build Instructions](docs/BUILD.md)** - Detailed build steps
-- **[Testing Guide](docs/TESTING.md)** - Test scenarios and validation
-- **[Agent Architecture](docs/Agents.md)** - Technical architecture document
+### Main Window
 
----
+| Control | Action |
+|---------|--------|
+| **Taskbar** button | Open Taskbar settings panel |
+| **Start Menu** button | Open Start Menu settings panel |
+| Core Engine toggle | Start / stop the overlay engine |
+| Run at startup toggle | Enable / disable Windows registry autostart |
 
-## 🎮 Usage
+### Detail Window (per panel)
 
-### Dashboard Controls
-
-**Taskbar Overlay:**
-- Toggle: Enable/Disable overlay
-- Slider: 0-100% opacity
-
-**Start Menu Overlay:**
-- Toggle: Enable/Disable overlay
-- Slider: 0-100% opacity
-
-**Status Indicators:**
-- ✓ Taskbar found / ⚠ Not detected
-- ✓ Start detected / ⚠ Not detected
-- ✓ Connected to Core / ✗ Connection failed
-
-### Keyboard Shortcuts (Future)
-- Currently no hotkeys implemented
-- Roadmap includes global hotkey toggle
+| Control | Action |
+|---------|--------|
+| Panel enable toggle | Enable / disable this overlay |
+| Transparency slider | 0–100% opacity |
+| R / G / B sliders | Background color (and Text Color for Start Menu) |
+| Color preview bar | Live preview of the selected color |
+| Menu Items checkboxes | Choose which items appear in Start Menu *(Start Menu panel only)* |
 
 ---
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
-### Overlay doesn't appear
-- Ensure Core is running (check Task Manager)
-- Check logs: `%LOCALAPPDATA%\CrystalFrame\CrystalFrame.log`
-- Verify Windows 11 (not Windows 10)
+**Overlay doesn't appear after enabling Core**
+- Wait 1–2 seconds for detection; status indicator turns green when found
+- If Taskbar not detected: restart Windows Explorer (Task Manager → Windows Explorer → Restart)
+- Logs: `%LOCALAPPDATA%\CrystalFrame\CrystalFrame.log`
 
-### Dashboard can't connect
-- Core must be running first
-- Check firewall isn't blocking Named Pipes
-- Restart both Core and Dashboard
+**Start Menu not detected**
+- Expected on some Windows builds; Taskbar overlay continues to work normally
+- Start overlay enables automatically when detection succeeds
 
-### Start Menu not detected
-- This is expected on some Windows builds
-- Start overlay automatically disables if detection fails
-- Taskbar overlay continues to work
-
-### Performance issues
-- Check CPU usage in Task Manager
-- Should be < 2% when idle
-- Verify DirectComposition is hardware accelerated
+**DetailWindow appears off-screen**
+- Fixed in v2.1 — window is now clamped to the display work area on all edges
 
 ---
 
-## 📊 Performance Targets
+## Performance
 
-| Metric | Target | Actual |
-|--------|--------|--------|
-| CPU (Idle) | < 2% | ~0.5% |
+| Metric | Target | Measured |
+|--------|--------|----------|
+| CPU (idle) | < 2% | ~0.5% |
 | Memory | < 50 MB | ~30 MB |
-| Startup Time | < 2 sec | ~1 sec |
-| Opacity Change | < 50 ms | ~16 ms |
+| Startup | < 2 s | ~1 s |
+| Opacity change latency | < 50 ms | ~16 ms |
 
 ---
 
-## 🛣️ Roadmap
+## Roadmap
 
-### Completed (v1.0)
-- ✅ Taskbar overlay (all edges)
-- ✅ Auto-hide support
-- ✅ Start Menu overlay
-- ✅ Config persistence
-- ✅ IPC communication
-- ✅ Explorer restart recovery
+### Done
+- Taskbar overlay (all edges + auto-hide support)
+- Start Menu overlay (auto-detect open/close)
+- Per-channel RGB color control
+- Config persistence (JSON)
+- Explorer restart recovery
+- Run at Startup (registry)
+- System theme (light/dark) support
+- Separate DetailWindow with dynamic sizing
 
-### Planned (v1.1+)
-- ⏳ Material effects (blur)
-- ⏳ Hotkey toggle
-- ⏳ Opacity presets (0/25/50/75/100)
-- ⏳ Multi-monitor support
-- ⏳ Auto-start on boot
-- ⏳ System tray icon
-
----
-
-## 🤝 Contributing
-
-Currently a personal project. Contributions welcome via pull requests!
-
-### Development Setup
-1. Read `docs/VSCODE-SETUP.md`
-2. Install prerequisites
-3. Build both Core and Dashboard
-4. Run tests from `docs/TESTING.md`
+### Planned
+- **System tray icon** — minimize to tray instead of taskbar; right-click menu
+- **Multi-monitor support** — overlay on non-primary displays
+- **Material effects** — blur / acrylic behind overlays
+- **Global hotkey** — toggle overlays without opening Dashboard
+- **Color presets** — quick-select common themes (Aero Glass, Dark, etc.)
+- **Auto-update check** — notify when a new GitHub release is available
 
 ---
 
-## 📄 License
+## Contributing
 
-MIT License - See LICENSE file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **DirectComposition API** - Microsoft Windows composition engine
-- **WinUI 3** - Modern Windows UI framework
-- **CMake** - Cross-platform build system
+Contributions welcome via pull requests. Please open an issue first for larger changes.
 
 ---
 
-## 📞 Contact
+## License
 
-For bugs or feature requests, open an issue on GitHub.
+MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Made with ❤️ for Windows 11 customization enthusiasts**
+**Made for Windows 11 customization enthusiasts**

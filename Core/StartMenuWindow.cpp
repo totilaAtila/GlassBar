@@ -180,7 +180,10 @@ void StartMenuWindow::SetOpacity(int opacity) {
 
 void StartMenuWindow::SetBackgroundColor(COLORREF color) {
     m_bgColor = color;
-    if (m_visible) InvalidateRect(m_hwnd, NULL, FALSE);
+    if (m_visible) {
+        ApplyTransparency();          // sync DWM accent/tint with new color
+        InvalidateRect(m_hwnd, NULL, FALSE);
+    }
 }
 
 void StartMenuWindow::SetTextColor(COLORREF color) {
@@ -947,7 +950,12 @@ LRESULT CALLBACK StartMenuWindow::EditDialogProc(HWND hwnd, UINT msg,
         return 0;
 
     case WM_DESTROY:
-        PostQuitMessage(0);
+        // Do NOT call PostQuitMessage here — this is a child dialog, not the
+        // main window.  PostQuitMessage would inject WM_QUIT into the shared
+        // message queue and cause the host application to exit unexpectedly
+        // after the dialog closes.  The ShowEditDialog() loop already
+        // terminates when IsWindow(dlg) becomes FALSE, so no quit signal
+        // is needed.
         return 0;
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);

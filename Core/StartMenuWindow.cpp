@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <powrprof.h>
 
@@ -122,27 +123,61 @@ bool StartMenuWindow::CreateMenuWindow() {
 }
 
 // ── Show / Hide ──────────────────────────────────────────────────────────────
-void StartMenuWindow::Show(int /*x*/, int /*y*/) {
+void StartMenuWindow::Show(int x, int y) {
     CF_LOG(Info, "StartMenuWindow::Show");
 
     if (!m_hwnd && !CreateMenuWindow()) return;
 
-    // Position: 1 px above taskbar top edge
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+
+    // Locate taskbar and detect its orientation
     HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
     RECT tbRect  = {};
-    int  menuY   = 0;
+    bool hasTb   = taskbar && GetWindowRect(taskbar, &tbRect);
 
-    if (taskbar && GetWindowRect(taskbar, &tbRect)) {
-        menuY = tbRect.top - HEIGHT - 1;
-    } else {
-        menuY = GetSystemMetrics(SM_CYSCREEN) - HEIGHT - 48;
+    // Detect Start button position (best-effort; fallback to hint x/y from hook)
+    int sbLeft = x, sbTop = y;
+    if (taskbar) {
+        HWND sb = FindWindowExW(taskbar, nullptr, L"Start", nullptr);
+        if (!sb) sb = FindWindowExW(taskbar, nullptr, L"TrayButton", nullptr);
+        if (sb) {
+            RECT sbRect = {};
+            if (GetWindowRect(sb, &sbRect)) {
+                sbLeft = sbRect.left;
+                sbTop  = sbRect.top;
+            }
+        }
     }
-    if (menuY < 0) menuY = 0;
 
-    // Center horizontally on primary monitor (Win11 style)
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int menuX   = (screenW - WIDTH) / 2;
-    if (menuX < 0) menuX = 0;
+    int menuX, menuY;
+
+    if (hasTb) {
+        bool tbBottom = tbRect.bottom >= screenH - 4;
+        bool tbTop    = tbRect.top    <= 4 && tbRect.bottom < screenH / 2;
+        bool tbLeft   = tbRect.left   <= 4 && tbRect.right  < screenW / 2;
+
+        if (tbBottom) {
+            menuX = sbLeft;
+            menuY = tbRect.top - HEIGHT - 1;
+        } else if (tbTop) {
+            menuX = sbLeft;
+            menuY = tbRect.bottom + 1;
+        } else if (tbLeft) {
+            menuX = tbRect.right + 1;
+            menuY = sbTop;
+        } else {
+            menuX = tbRect.left - WIDTH - 1;
+            menuY = sbTop;
+        }
+    } else {
+        menuX = 0;
+        menuY = screenH - HEIGHT - 48;
+    }
+
+    // Clamp so menu never goes off-screen
+    menuX = max(0, min(menuX, screenW - WIDTH));
+    menuY = max(0, min(menuY, screenH - HEIGHT));
 
     SetWindowPos(m_hwnd, HWND_TOPMOST, menuX, menuY, WIDTH, HEIGHT,
                  SWP_SHOWWINDOW | SWP_NOACTIVATE);
@@ -856,12 +891,17 @@ void StartMenuWindow::SaveCustomNames() {
     std::wofstream f(dir + L"\\menu_names.json");
     if (!f.is_open()) return;
 
-    f << L"{\n";
+    std::vector<std::wstring> entries;
     for (int i = 0; i < 7; ++i)
         if (!m_customMenuNames[i].empty())
-            f << L"  \"menu_" << i << L"\": \"" << m_customMenuNames[i] << L"\",\n";
+            entries.push_back(L"  \"menu_" + std::to_wstring(i) +
+                              L"\": \"" + m_customMenuNames[i] + L"\"");
     if (!m_customTitle.empty())
-        f << L"  \"title\": \"" << m_customTitle << L"\"\n";
+        entries.push_back(L"  \"title\": \"" + m_customTitle + L"\"");
+
+    f << L"{\n";
+    for (size_t i = 0; i < entries.size(); ++i)
+        f << entries[i] << (i + 1 < entries.size() ? L",\n" : L"\n");
     f << L"}\n";
 }
 

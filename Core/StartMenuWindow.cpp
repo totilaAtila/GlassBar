@@ -153,22 +153,28 @@ void StartMenuWindow::Show(int x, int y) {
     int menuX, menuY;
 
     if (hasTb) {
-        bool tbBottom = tbRect.bottom >= screenH - 4;
-        bool tbTop    = tbRect.top    <= 4 && tbRect.bottom < screenH / 2;
-        bool tbLeft   = tbRect.left   <= 4 && tbRect.right  < screenW / 2;
+        int tbW = tbRect.right  - tbRect.left;
+        int tbH = tbRect.bottom - tbRect.top;
 
-        if (tbBottom) {
-            menuX = sbLeft;
-            menuY = tbRect.top - HEIGHT - 1;
+        // Check vertical orientation first (tbW < tbH) to avoid full-height
+        // left/right taskbars being misclassified as bottom-docked.
+        bool tbLeft  = tbW < tbH && tbRect.left <= screenW / 2;
+        bool tbRight = tbW < tbH && tbRect.left >  screenW / 2;
+        bool tbTop   = tbW >= tbH && tbRect.top <= screenH / 2;
+        // default: bottom-docked
+
+        if (tbLeft) {
+            menuX = tbRect.right + 1;
+            menuY = sbTop;
+        } else if (tbRight) {
+            menuX = tbRect.left - WIDTH - 1;
+            menuY = sbTop;
         } else if (tbTop) {
             menuX = sbLeft;
             menuY = tbRect.bottom + 1;
-        } else if (tbLeft) {
-            menuX = tbRect.right + 1;
-            menuY = sbTop;
         } else {
-            menuX = tbRect.left - WIDTH - 1;
-            menuY = sbTop;
+            menuX = sbLeft;
+            menuY = tbRect.top - HEIGHT - 1;
         }
     } else {
         menuX = 0;

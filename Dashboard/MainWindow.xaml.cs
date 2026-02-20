@@ -26,7 +26,7 @@ namespace CrystalFrame.Dashboard
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
-        public MainWindow()
+        public MainWindow(bool startHidden = false)
         {
             InitializeComponent();
 
@@ -61,6 +61,10 @@ namespace CrystalFrame.Dashboard
             _trayIconManager = new TrayIconManager(hwnd, iconPath,
                 onShow: ShowFromTray,
                 onExit: ExitFromTray);
+
+            // When launched at Windows startup, stay hidden in tray until user opens manually
+            if (startHidden)
+                DispatcherQueue.TryEnqueue(() => _appWindow.Hide());
 
             _ = InitializeAsync();
         }

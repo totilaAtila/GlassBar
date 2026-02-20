@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <powrprof.h>
 
@@ -890,12 +891,17 @@ void StartMenuWindow::SaveCustomNames() {
     std::wofstream f(dir + L"\\menu_names.json");
     if (!f.is_open()) return;
 
-    f << L"{\n";
+    std::vector<std::wstring> entries;
     for (int i = 0; i < 7; ++i)
         if (!m_customMenuNames[i].empty())
-            f << L"  \"menu_" << i << L"\": \"" << m_customMenuNames[i] << L"\",\n";
+            entries.push_back(L"  \"menu_" + std::to_wstring(i) +
+                              L"\": \"" + m_customMenuNames[i] + L"\"");
     if (!m_customTitle.empty())
-        f << L"  \"title\": \"" << m_customTitle << L"\"\n";
+        entries.push_back(L"  \"title\": \"" + m_customTitle + L"\"");
+
+    f << L"{\n";
+    for (size_t i = 0; i < entries.size(); ++i)
+        f << entries[i] << (i + 1 < entries.size() ? L",\n" : L"\n");
     f << L"}\n";
 }
 

@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -42,7 +43,12 @@ namespace CrystalFrame.Dashboard
                 return;
             }
 
-            _window = new MainWindow();
+            // If launched via the "Run at startup" registry entry, start hidden in tray
+            bool startHidden = args.Arguments.Contains("/autostart", StringComparison.OrdinalIgnoreCase)
+                            || Environment.GetCommandLineArgs().Any(
+                                   a => a.Equals("/autostart", StringComparison.OrdinalIgnoreCase));
+
+            _window = new MainWindow(startHidden);
             _window.Activate();
         }
 

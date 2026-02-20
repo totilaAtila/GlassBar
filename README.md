@@ -16,7 +16,8 @@
 - **RGB Color Control** — Independent R/G/B sliders for background and text color per panel
 - **Opacity Control** — 0–100% adjustable per panel
 - **Enable/Disable per panel** — Toggle Taskbar and Start Menu overlays independently
-- **Run at Startup** — Optional auto-start via Windows registry
+- **Run at Startup** — Optional auto-start via Windows registry; starts silently in System Tray
+- **System Tray icon** — Minimize to tray; right-click menu (Open / Exit); double-click to restore
 - **System Theme Support** — Follows Windows light/dark theme automatically
 - **Click-Through** — Full Taskbar and Start Menu functionality preserved
 - **Explorer Restart Recovery** — Auto re-detects Taskbar/Start after Explorer crashes
@@ -150,12 +151,13 @@ Click **Core Engine** toggle → ON to start the overlay engine.
 - Per-channel RGB color control
 - Config persistence (JSON)
 - Explorer restart recovery
-- Run at Startup (registry)
+- Run at Startup (registry) — starts hidden in System Tray when launched at boot
 - System theme (light/dark) support
 - Separate DetailWindow with dynamic sizing
+- System tray icon — minimize to tray; right-click menu (Open / Exit); double-click to restore
+- Custom Win11-style Start Menu (pinned grid, recommended items, search box, user area)
 
 ### Planned
-- **System tray icon** — minimize to tray instead of taskbar; right-click menu
 - **Multi-monitor support** — overlay on non-primary displays
 - **Material effects** — blur / acrylic behind overlays
 - **Global hotkey** — toggle overlays without opening Dashboard

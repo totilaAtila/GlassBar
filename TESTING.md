@@ -113,6 +113,20 @@ Quick testing scenarios to validate all functionality.
 
 ## Milestone M4: Final Validation
 
+### TC-M4-00: Autostart → Start hidden in System Tray
+**Steps:**
+1. Open Dashboard
+2. Enable "Run at startup" toggle
+3. Verify registry key: `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CrystalFrame`
+   - Value must be: `"<path>\CrystalFrame.Dashboard.exe" /autostart`
+4. Sign out and sign back in (or run the command manually from CLI)
+5. Check that **no Dashboard window appears** on screen
+6. Check that a **CrystalFrame icon is visible in the System Tray**
+7. Double-click the tray icon → Dashboard window opens
+8. Right-click the tray icon → context menu shows "Open CrystalFrame" and "Exit"
+
+**Expected:** ✓ Window stays hidden at startup; tray icon present; double-click/right-click work
+
 ### TC-M4-01: Config Persistence
 **Steps:**
 1. Set Taskbar opacity to 63, Start opacity to 42

@@ -40,8 +40,8 @@ namespace CrystalFrame.Dashboard
                                ?? Process.GetCurrentProcess().MainModule?.FileName;
                     if (path != null)
                     {
-                        key.SetValue(AppName, $"\"{path}\"");
-                        Debug.WriteLine($"[Startup] Registered: \"{path}\"");
+                        key.SetValue(AppName, $"\"{path}\" /autostart");
+                        Debug.WriteLine($"[Startup] Registered: \"{path}\" /autostart");
                     }
                 }
                 else

@@ -1,6 +1,6 @@
 
 # WORKLOG — Win7-Revival / CrystalFrame
-Last updated: 2026-02-21 (session 3)
+Last updated: 2026-02-21 (session 4)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -44,11 +44,29 @@ Current Start Menu implementation:
   - Stub in `StartMenuWindow`: `m_programTree` member cached in `Initialize()`; TODO comment
     placed in `WM_LBUTTONDOWN` for Phase S2 "All Programs" click.
   - `ole32.lib` added to `CMakeLists.txt` for `CoCreateInstance`.
+  - COM guard note (corrected): `CoUninitialize()` is called when `CoInitializeEx` succeeds
+    (`S_OK` **or** `S_FALSE`; both increment the COM reference count per MSDN).
+    `RPC_E_CHANGED_MODE` is tolerated and not balanced.
 
+- **Phase S1 left-column Win7 alignment + Phase S2 All Programs UI DONE (2026-02-21):**
+  - Left column completely redesigned to Win7 layout:
+    - **Programs list** (vertical rows, icon + name) replaces the Win11-style 2×3 pinned grid.
+    - **"All Programs ›" / "◄ Back" row** sits just above the search box; single click toggles view.
+    - **Search box moved to bottom** of left column (Win7 position), directly above the bottom bar.
+    - "Recommended" section removed (Win11 concept, not present in Win7).
+    - `PaintProgramsList`, `PaintAllProgramsView`, `PaintApRow`, `PaintWin7SearchBox` replace the old paint methods.
+  - All Programs view fully wired (Phase S2 UI):
+    - `LeftViewMode` enum (`Programs` / `AllPrograms`) controls left-column rendering.
+    - Navigation stack (`m_apNavStack`) enables unlimited folder drill-down; each folder click pushes children pointer.
+    - `NavigateIntoFolder` / `NavigateBack` + ESC key navigate the tree.
+    - `LaunchApItem`: folder → drill in; shortcut → `ShellExecuteW` + log on failure.
+    - Hover highlights wired for programs list, AP row, and AP item list.
+    - `Hide()` resets view to `Programs` and clears nav stack on every close.
+    - AP_MAX_VISIBLE (~16 items) limits display without scroll; "▼ more…" hint shown if truncated.
+  - No dead UI: every visible clickable element has a real action.
 
 Remaining for Phase S1 DoD:
 - Pixel/layout screenshot validation.
-- Left column Win7 alignment (typography, spacing).
 
 New requirement (non-negotiable, §10):
 - **Start Menu must be visually AND functionally identical to Windows 7**
@@ -107,29 +125,33 @@ Files: `Core/StartMenuWindow.h/.cpp`
 - Custom Win32 painting (GDI) and hit testing.
 - Layout: **Win7 two-column** (580 × 700 px):
   - `DIVIDER_X = 330` separates left (programs) from right (shell links).
-  - Left column: Search box | Pinned 2×3 grid | Recommended section | Bottom bar.
+  - Left column: Programs list (vertical) | "All Programs / Back" row | Search box | Bottom bar.
   - Right column: Username header + `Win7RightItem` list (folders + separator + applets).
+- Left-column view mode (`LeftViewMode` enum):
+  - `Programs` — vertical list of 6 pinned apps (icon + name rows) + "All Programs ›" row.
+  - `AllPrograms` — tree view from `m_programTree`; folders drill-in; shortcuts launch; "◄ Back" row.
+- Navigation stack (`m_apNavStack`) for unlimited folder drill-down; cleared on `Hide()`.
 - Executes items via:
   - `SHGetKnownFolderPath` for personal folders (Documents, Pictures, Music, Downloads).
   - `shell:MyComputerFolder` shell target for Computer (virtual folder — no filesystem path).
   - `ShellExecuteW` for shell applets (control, CLSID shell links, ms-settings:, HelpPane.exe).
-  - Hover/click wired for all 10 right-column entries; separators non-clickable.
+  - `ShellExecuteW` for All Programs shortcuts (resolved target + args from MenuNode).
+  - Hover/click wired for all 10 right-column entries, programs list, AP list, AP row, power button.
 - Username displayed in right-column header (from `GetEnvironmentVariableW("USERNAME")` / `GetUserNameW` fallback).
+- ESC key: in AllPrograms view → navigate back one level / to Programs; in Programs view → Hide.
 
-### All Programs data module (Phase S2 foundation)
+### All Programs data module (Phase S2 — complete)
 Files: `Core/AllProgramsEnumerator.h/.cpp`
 - Pure data/model layer — no GDI, no UI.
 - `MenuNode` struct: display name, isFolder flag, resolved target, args, folderPath, children.
 - `ResolveShortcutTarget()`: resolves `.lnk` via `IShellLinkW`/`IPersistFile`; `.url` via INI parse.
 - `BuildAllProgramsTree()`: merges FOLDERID_CommonPrograms + FOLDERID_Programs; recursive; sorted.
   Self-manages COM (`CoInitializeEx/COINIT_APARTMENTTHREADED`); tolerates `RPC_E_CHANGED_MODE`;
-  `CoUninitialize()` called only when the function was the one to initialise COM.
+  `CoUninitialize()` called when `CoInitializeEx` succeeds (S_OK **or** S_FALSE — both increment
+  the COM refcount per MSDN); `RPC_E_CHANGED_MODE` (FAILED) is tolerated and not balanced.
 - `ole32.lib` linked for `CoCreateInstance`.
-- Integrated as `m_programTree` (cached at `StartMenuWindow::Initialize()`, before HWND creation);
-  not yet rendered.
-- **2026-02-21 fix:** tree build moved from `CreateMenuWindow()` to `Initialize()` to match WORKLOG
-  and to decouple the COM/FS-heavy scan from window creation.  COM guard added to
-  `BuildAllProgramsTree()` so callers need no external `CoInitializeEx`.
+- Integrated as `m_programTree` (cached at `StartMenuWindow::Initialize()`, before HWND creation).
+- Rendered in `PaintAllProgramsView`; navigation via `NavigateIntoFolder` / `NavigateBack`.
 
 ### Existing plan document (applies to current Win11-style menu)
 File: `PLAN.md`
@@ -218,19 +240,19 @@ DoD:
    - `PaintWin7RightColumn()`, `GetRightItemAtPoint()`, `ExecuteRightItem()` implemented.
    - `DIVIDER_X = 330` two-column split established in layout constants.
    - Files: `Core/StartMenuWindow.h`, `Core/StartMenuWindow.cpp`.
-4) 🔧 **All Programs enumerator** *(foundation DONE 2026-02-21 — branch `claude/win11-start-menu-redesign-T0m6X`)*:
-   - `Core/AllProgramsEnumerator.h/.cpp` created: `MenuNode`, `ResolveShortcutTarget`, `BuildAllProgramsTree`.
-   - Tree pre-cached in `StartMenuWindow::m_programTree` at `Initialize()` (before HWND creation).
-   - `BuildAllProgramsTree()` self-manages COM; no external `CoInitializeEx` required by callers.
-   - **Next**: Phase S2 UI — detect "All Programs" click → render `m_programTree` in left column; hover submenus.
-5) **Keyboard navigation skeleton**:
-   - ESC closes
-   - Arrow keys move selection
-   - Enter launches
-   - Right arrow opens submenu
-6) **Left column Win7 alignment**:
-   - Typography, spacing, and visual styling to match Win7 look (currently Win11-style baseline).
-   - Add "All Programs" entry at bottom of left column.
+4) ✅ **All Programs enumerator + UI** *(DONE 2026-02-21 — branch `claude/win11-start-menu-redesign-T0m6X`)*:
+   - `Core/AllProgramsEnumerator.h/.cpp`: `MenuNode`, `ResolveShortcutTarget`, `BuildAllProgramsTree`.
+   - `PaintAllProgramsView`, `PaintApRow`, navigation stack, `LaunchApItem` all implemented.
+   - ESC navigates back in All Programs view; folder click drills in; shortcut click launches.
+5) 🔧 **Keyboard navigation (arrow keys)** *(partial — ESC done; arrows/Enter/Tab pending)*:
+   - ESC: ✅ done (navigates back or hides).
+   - Arrow up/down move selection in programs list or AP list: **TODO Phase S3**.
+   - Enter launches selected item: **TODO Phase S3**.
+6) ✅ **Left column Win7 alignment** *(DONE 2026-02-21)*:
+   - Programs list replaced 2×3 pinned grid: vertical rows, icon + name.
+   - "All Programs ›" entry added at bottom of list (above search box).
+   - Search box moved to Win7 position (bottom of left column, above bottom bar).
+   - "Recommended" section removed (Win11 concept only).
 
 ---
 

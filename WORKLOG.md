@@ -443,7 +443,7 @@ Request:
 - Acceptance criteria (measurable):
 - Tests to run (from TESTING.md + new ones):
 ## 10) Non-negotiables (repeat here so they are never “forgotten”)
-- Start Menu: visually + functional identical to Windows 7.
+- Start Menu: visually + functional identical to Windows 7. (everything but Search Bar. Not needed)
 - All menus/submenus: 100% functional (no dead UI).
 - No injection / no patching system components.
 - Clear logs + fail-safe behavior, no silent failures.

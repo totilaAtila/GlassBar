@@ -247,11 +247,15 @@ void StartMenuWindow::Hide() {
         // Reset to Programs view on every hide
         m_viewMode         = LeftViewMode::Programs;
         m_apNavStack.clear();
-        m_hoveredProgIndex = -1;
-        m_hoveredApRow     = false;
-        m_hoveredApIndex   = -1;
+        m_hoveredProgIndex  = -1;
+        m_hoveredApRow      = false;
+        m_hoveredApIndex    = -1;
         m_hoveredRightIndex = -1;
-        m_hoveredPower     = false;
+        m_hoveredPower      = false;
+        m_keySelProgIndex   = -1;
+        m_keySelApRow       = false;
+        m_keySelApIndex     = -1;
+        m_apScrollOffset    = 0;
         CF_LOG(Info, "StartMenuWindow::Hide");
     }
 }
@@ -360,6 +364,11 @@ COLORREF StartMenuWindow::CalculateBorderColor() {
                max(0, min(255, b + d)));
 }
 
+// Blue accent used for keyboard-focus highlight (distinct from mouse-hover gray)
+COLORREF StartMenuWindow::CalculateSelectionColor() {
+    return RGB(0, 96, 180);
+}
+
 // ── DrawIconSquare ────────────────────────────────────────────────────────────
 void StartMenuWindow::DrawIconSquare(HDC hdc, int cx, int cy, int sz,
                                      COLORREF bgColor, const wchar_t* label,
@@ -418,9 +427,12 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
     for (int i = 0; i < PROG_COUNT; ++i) {
         int itemY = PROG_Y + i * PROG_ITEM_H;
 
-        // Hover highlight
-        if (i == m_hoveredProgIndex) {
-            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+        // Hover / keyboard-selection highlight (mutually exclusive visually)
+        bool isKeySel = (i == m_keySelProgIndex);
+        bool isHover  = (i == m_hoveredProgIndex) && !isKeySel;
+        if (isKeySel || isHover) {
+            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : CalculateHoverColor();
+            HBRUSH hBr  = CreateSolidBrush(hlColor);
             HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
             HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
             HPEN   op   = (HPEN)SelectObject(hdc, noPn);
@@ -463,6 +475,14 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
     SetBkMode(hdc, TRANSPARENT);
 
     const auto& nodes = CurrentApNodes();
+    int total = static_cast<int>(nodes.size());
+
+    // Clamp scroll offset in case the list shrank (e.g. after NavigateBack).
+    int maxOff = max(0, total - AP_MAX_VISIBLE);
+    if (m_apScrollOffset > maxOff) m_apScrollOffset = maxOff;
+    if (m_apScrollOffset < 0)      m_apScrollOffset = 0;
+
+    int count = max(0, min(AP_MAX_VISIBLE, total - m_apScrollOffset));
 
     HFONT nameFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -472,15 +492,17 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, nameFont);
 
-    int count = min(static_cast<int>(nodes.size()), AP_MAX_VISIBLE);
-
     for (int i = 0; i < count; ++i) {
-        const MenuNode& node  = nodes[static_cast<size_t>(i)];
-        int             itemY = PROG_Y + i * PROG_ITEM_H;
+        int             nodeIdx = m_apScrollOffset + i;
+        const MenuNode& node    = nodes[static_cast<size_t>(nodeIdx)];
+        int             itemY   = PROG_Y + i * PROG_ITEM_H;
 
-        // Hover highlight
-        if (i == m_hoveredApIndex) {
-            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+        // Hover / keyboard-selection highlight (both use absolute nodeIdx).
+        bool isKeySel = (nodeIdx == m_keySelApIndex);
+        bool isHover  = (nodeIdx == m_hoveredApIndex) && !isKeySel;
+        if (isKeySel || isHover) {
+            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : CalculateHoverColor();
+            HBRUSH hBr  = CreateSolidBrush(hlColor);
             HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
             HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
             HPEN   op   = (HPEN)SelectObject(hdc, noPn);
@@ -513,13 +535,22 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
-    // Hint if more items exist than we can show
-    if (static_cast<int>(nodes.size()) > AP_MAX_VISIBLE) {
-        int lastY = PROG_Y + AP_MAX_VISIBLE * PROG_ITEM_H;
+    // "▲ scroll…" accent when items exist above the visible window.
+    if (m_apScrollOffset > 0) {
+        SelectObject(hdc, nameFont);
+        ::SetTextColor(hdc, CalculateBorderColor());
+        RECT tr = { MARGIN, PROG_Y, DIVIDER_X - MARGIN, PROG_Y + PROG_ITEM_H / 2 };
+        DrawTextW(hdc, L"\u25b2  scroll\u2026", -1, &tr,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    // "▼ more…" hint when items remain below the visible window.
+    if (m_apScrollOffset + count < total) {
+        int lastY = PROG_Y + count * PROG_ITEM_H;
         SelectObject(hdc, nameFont);
         ::SetTextColor(hdc, CalculateBorderColor());
         RECT mr = { MARGIN, lastY, DIVIDER_X - MARGIN, AP_ROW_Y };
-        DrawTextW(hdc, L"▼  more…", -1, &mr,
+        DrawTextW(hdc, L"\u25bc  more\u2026", -1, &mr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
@@ -539,17 +570,22 @@ void StartMenuWindow::PaintApRow(HDC hdc, const RECT& cr) {
     // Thin rule above the row
     DrawSeparator(hdc, AP_ROW_Y - 1, MARGIN, DIVIDER_X - MARGIN);
 
-    // Hover highlight
-    if (m_hoveredApRow) {
-        HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
-        HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
-        HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
-        HPEN   op   = (HPEN)SelectObject(hdc, noPn);
-        RoundRect(hdc, MARGIN, AP_ROW_Y + 1,
-                  DIVIDER_X - MARGIN, AP_ROW_Y + AP_ROW_H - 1, 4, 4);
-        SelectObject(hdc, ob);
-        SelectObject(hdc, op);
-        DeleteObject(hBr);
+    // Hover / keyboard-selection highlight
+    {
+        bool isKeySel = m_keySelApRow;
+        bool isHover  = m_hoveredApRow && !isKeySel;
+        if (isKeySel || isHover) {
+            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : CalculateHoverColor();
+            HBRUSH hBr  = CreateSolidBrush(hlColor);
+            HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
+            HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
+            HPEN   op   = (HPEN)SelectObject(hdc, noPn);
+            RoundRect(hdc, MARGIN, AP_ROW_Y + 1,
+                      DIVIDER_X - MARGIN, AP_ROW_Y + AP_ROW_H - 1, 4, 4);
+            SelectObject(hdc, ob);
+            SelectObject(hdc, op);
+            DeleteObject(hBr);
+        }
     }
 
     HFONT rowFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -851,13 +887,16 @@ bool StartMenuWindow::IsOverApRow(POINT pt) {
     return pt.y >= AP_ROW_Y && pt.y < AP_ROW_Y + AP_ROW_H;
 }
 
-// Returns the All Programs list item index at pt, or -1.
+// Returns the All Programs list item absolute index at pt, or -1.
+// "Absolute" means m_apScrollOffset + visual row, consistent with
+// m_keySelApIndex and m_hoveredApIndex which also use absolute indices.
 int StartMenuWindow::GetApItemAtPoint(POINT pt) {
     if (pt.x < MARGIN || pt.x >= DIVIDER_X - MARGIN) return -1;
     if (pt.y < PROG_Y || pt.y >= AP_ROW_Y) return -1;
-    int idx = (pt.y - PROG_Y) / PROG_ITEM_H;
-    int count = min(static_cast<int>(CurrentApNodes().size()), AP_MAX_VISIBLE);
-    if (idx >= 0 && idx < count) return idx;
+    int visualIdx = (pt.y - PROG_Y) / PROG_ITEM_H;
+    int total = static_cast<int>(CurrentApNodes().size());
+    int count = max(0, min(AP_MAX_VISIBLE, total - m_apScrollOffset));
+    if (visualIdx >= 0 && visualIdx < count) return m_apScrollOffset + visualIdx;
     return -1;
 }
 
@@ -1002,6 +1041,9 @@ const std::vector<MenuNode>& StartMenuWindow::CurrentApNodes() const {
 void StartMenuWindow::NavigateIntoFolder(const std::vector<MenuNode>& children) {
     m_apNavStack.push_back(&children);
     m_hoveredApIndex = -1;
+    m_keySelApIndex  = -1;
+    m_keySelApRow    = false;
+    m_apScrollOffset = 0;
     if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
     CF_LOG(Info, "AP drill-down: depth=" << m_apNavStack.size()
            << " nodes=" << children.size());
@@ -1011,11 +1053,16 @@ void StartMenuWindow::NavigateBack() {
     if (!m_apNavStack.empty()) {
         m_apNavStack.pop_back();
         m_hoveredApIndex = -1;
+        m_keySelApIndex  = -1;
+        m_keySelApRow    = false;
+        m_apScrollOffset = 0;
         CF_LOG(Info, "AP navigate back: depth=" << m_apNavStack.size());
     } else {
         // Already at root All Programs level — return to Programs view
         m_viewMode         = LeftViewMode::Programs;
         m_hoveredProgIndex = -1;
+        m_keySelApIndex    = -1;
+        m_keySelApRow      = false;
         CF_LOG(Info, "AP navigate back to Programs view");
     }
     if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
@@ -1086,24 +1133,33 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
 
-        int  nProg = (m_viewMode == LeftViewMode::Programs)
-                     ? GetProgItemAtPoint(pt) : -1;
+        int  nProg  = (m_viewMode == LeftViewMode::Programs)
+                      ? GetProgItemAtPoint(pt) : -1;
         bool nApRow = IsOverApRow(pt);
-        int  nAp   = (m_viewMode == LeftViewMode::AllPrograms)
-                     ? GetApItemAtPoint(pt) : -1;
-        int  nrc   = GetRightItemAtPoint(pt);
-        bool npwr  = IsOverPowerButton(pt);
+        int  nAp    = (m_viewMode == LeftViewMode::AllPrograms)
+                      ? GetApItemAtPoint(pt) : -1;
+        int  nrc    = GetRightItemAtPoint(pt);
+        bool npwr   = IsOverPowerButton(pt);
+
+        // Mouse movement clears keyboard selection (modes are mutually exclusive)
+        bool hadKeySel = (m_keySelProgIndex >= 0 || m_keySelApRow || m_keySelApIndex >= 0);
 
         if (nProg != m_hoveredProgIndex  ||
             nApRow != m_hoveredApRow     ||
-            nAp   != m_hoveredApIndex   ||
-            nrc   != m_hoveredRightIndex ||
-            npwr  != m_hoveredPower) {
+            nAp    != m_hoveredApIndex   ||
+            nrc    != m_hoveredRightIndex ||
+            npwr   != m_hoveredPower     ||
+            hadKeySel) {
             m_hoveredProgIndex  = nProg;
             m_hoveredApRow      = nApRow;
             m_hoveredApIndex    = nAp;
             m_hoveredRightIndex = nrc;
             m_hoveredPower      = npwr;
+            if (hadKeySel) {
+                m_keySelProgIndex = -1;
+                m_keySelApRow     = false;
+                m_keySelApIndex   = -1;
+            }
             InvalidateRect(m_hwnd, NULL, FALSE);
         }
         return 0;
@@ -1167,10 +1223,107 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE) {
             if (m_viewMode == LeftViewMode::AllPrograms)
-                NavigateBack();   // ESC goes back one level / to Programs
+                NavigateBack();
             else
                 Hide();
+            return 0;
         }
+
+        if (wParam == VK_DOWN || wParam == VK_UP) {
+            bool down = (wParam == VK_DOWN);
+
+            if (m_viewMode == LeftViewMode::Programs) {
+                // Navigation range: 0..PROG_COUNT-1, then AP row
+                if (down) {
+                    if (m_keySelApRow) {
+                        // already at bottom; clamp
+                    } else if (m_keySelProgIndex < 0) {
+                        m_keySelProgIndex = 0;
+                    } else if (m_keySelProgIndex < PROG_COUNT - 1) {
+                        ++m_keySelProgIndex;
+                    } else {
+                        m_keySelApRow     = true;
+                        m_keySelProgIndex = -1;
+                    }
+                } else {
+                    if (m_keySelApRow) {
+                        m_keySelApRow     = false;
+                        m_keySelProgIndex = PROG_COUNT - 1;
+                    } else if (m_keySelProgIndex > 0) {
+                        --m_keySelProgIndex;
+                    } else if (m_keySelProgIndex == 0) {
+                        // clamp at top
+                    } else {
+                        m_keySelProgIndex = 0;   // start navigation from top
+                    }
+                }
+            } else {
+                // AllPrograms view: absolute range 0..total-1, then Back row.
+                // m_keySelApIndex is an absolute node index (not a visual row).
+                int total = static_cast<int>(CurrentApNodes().size());
+                if (down) {
+                    if (m_keySelApRow) {
+                        // already at bottom; clamp
+                    } else if (m_keySelApIndex < 0) {
+                        m_keySelApIndex = 0;
+                    } else if (m_keySelApIndex < total - 1) {
+                        ++m_keySelApIndex;
+                    } else {
+                        m_keySelApRow   = true;
+                        m_keySelApIndex = -1;
+                    }
+                } else {
+                    if (m_keySelApRow) {
+                        m_keySelApRow   = false;
+                        m_keySelApIndex = (total > 0) ? total - 1 : -1;
+                    } else if (m_keySelApIndex > 0) {
+                        --m_keySelApIndex;
+                    } else if (m_keySelApIndex == 0) {
+                        // clamp at top
+                    } else {
+                        m_keySelApIndex = 0;
+                    }
+                }
+                // Auto-scroll so the selected item stays in the visible window.
+                if (m_keySelApIndex >= 0) {
+                    if (m_keySelApIndex < m_apScrollOffset)
+                        m_apScrollOffset = m_keySelApIndex;
+                    else if (m_keySelApIndex >= m_apScrollOffset + AP_MAX_VISIBLE)
+                        m_apScrollOffset = m_keySelApIndex - AP_MAX_VISIBLE + 1;
+                }
+            }
+            InvalidateRect(m_hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        if (wParam == VK_RETURN) {
+            if (m_viewMode == LeftViewMode::Programs) {
+                if (m_keySelApRow) {
+                    // Enter on "All Programs" row → switch view
+                    m_keySelApRow    = false;
+                    m_keySelApIndex  = -1;
+                    m_viewMode       = LeftViewMode::AllPrograms;
+                    m_apNavStack.clear();
+                    CF_LOG(Info, "Keyboard: switch to All Programs view");
+                    InvalidateRect(m_hwnd, NULL, FALSE);
+                } else if (m_keySelProgIndex >= 0) {
+                    int idx           = m_keySelProgIndex;
+                    m_keySelProgIndex = -1;
+                    ExecutePinnedItem(idx);
+                }
+            } else {
+                if (m_keySelApRow) {
+                    m_keySelApRow = false;
+                    NavigateBack();
+                } else if (m_keySelApIndex >= 0) {
+                    int idx         = m_keySelApIndex;
+                    m_keySelApIndex = -1;
+                    LaunchApItem(idx);
+                }
+            }
+            return 0;
+        }
+
         return 0;
 
     default:

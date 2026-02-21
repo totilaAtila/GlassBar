@@ -99,6 +99,9 @@ public:
     /// Get current window bounds in screen coordinates (empty RECT if hidden)
     RECT GetWindowBounds() const;
 
+    /// Get underlying HWND (used by StartMenuHook to PostMessage nav keys)
+    HWND GetMenuHwnd() const { return m_hwnd; }
+
     /// Cleanup all windows and hooks
     void Shutdown();
 
@@ -141,6 +144,14 @@ private:
     int  m_hoveredRightIndex   = -1;   // Win7 right column hover
     bool m_hoveredPower        = false;
     bool m_trackingMouse       = false;
+
+    // Keyboard selection state (distinct from hover; cleared by mouse movement)
+    int  m_keySelProgIndex     = -1;   // keyboard-focused item in Programs list
+    bool m_keySelApRow         = false; // keyboard focus on "All Programs"/"Back" row
+    int  m_keySelApIndex       = -1;   // keyboard-focused item in AllPrograms list (absolute)
+
+    // Scroll offset for AllPrograms list (first visible node index); keyboard-driven.
+    int  m_apScrollOffset      = 0;
 
     // Cached Windows login name for the right-column header
     wchar_t m_username[64] = {};
@@ -255,8 +266,9 @@ private:
 
     // ── Color helpers ────────────────────────────────────────────────────────
     COLORREF CalculateHoverColor();
-    COLORREF CalculateSubtleColor();   // slightly lighter/darker than bg
-    COLORREF CalculateBorderColor();   // subtle border
+    COLORREF CalculateSubtleColor();      // slightly lighter/darker than bg
+    COLORREF CalculateBorderColor();      // subtle border
+    COLORREF CalculateSelectionColor();   // keyboard-focus accent (fixed blue)
 
     // ── Name helpers ─────────────────────────────────────────────────────────
     const wchar_t* GetMenuItemName(int index);

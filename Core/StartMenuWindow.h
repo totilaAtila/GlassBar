@@ -99,6 +99,9 @@ public:
     /// Get current window bounds in screen coordinates (empty RECT if hidden)
     RECT GetWindowBounds() const;
 
+    /// Get underlying HWND (used by StartMenuHook to PostMessage nav keys)
+    HWND GetMenuHwnd() const { return m_hwnd; }
+
     /// Cleanup all windows and hooks
     void Shutdown();
 

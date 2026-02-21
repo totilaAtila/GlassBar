@@ -256,6 +256,11 @@ void StartMenuWindow::Hide() {
         m_keySelApRow       = false;
         m_keySelApIndex     = -1;
         m_apScrollOffset    = 0;
+        if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; }
+        m_hoverCandidate    = -1;
+        m_subMenuOpen       = false;
+        m_subMenuNodeIdx    = -1;
+        m_subMenuHoveredIdx = -1;
         CF_LOG(Info, "StartMenuWindow::Hide");
     }
 }
@@ -863,8 +868,10 @@ void StartMenuWindow::Paint() {
     PaintApRow(hdc, cr);
     PaintWin7SearchBox(hdc, cr);
 
-    // Right column and bottom bar (always visible)
+    // Right column: draw normal links, or overlay with submenu when open
     PaintWin7RightColumn(hdc, cr);
+    if (m_subMenuOpen)
+        PaintSubMenu(hdc, cr);
     PaintBottomBar(hdc, cr);
 
     EndPaint(m_hwnd, &ps);
@@ -913,6 +920,7 @@ bool StartMenuWindow::IsOverPowerButton(POINT pt) {
 // Returns the index into s_rightItems that the cursor is over, or -1.
 // Separators and the username header are never returned (not clickable).
 int StartMenuWindow::GetRightItemAtPoint(POINT pt) {
+    if (m_subMenuOpen) return -1;          // submenu covers the right column
     if (pt.x <= DIVIDER_X) return -1;      // left column
     if (pt.y >= BOTTOM_BAR_Y) return -1;   // bottom bar handled separately
 
@@ -1039,17 +1047,28 @@ const std::vector<MenuNode>& StartMenuWindow::CurrentApNodes() const {
 }
 
 void StartMenuWindow::NavigateIntoFolder(const std::vector<MenuNode>& children) {
+    if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; }
+    m_hoverCandidate    = -1;
+    m_subMenuOpen       = false;
+    m_subMenuNodeIdx    = -1;
+    m_subMenuHoveredIdx = -1;
     m_apNavStack.push_back(&children);
-    m_hoveredApIndex = -1;
-    m_keySelApIndex  = -1;
-    m_keySelApRow    = false;
-    m_apScrollOffset = 0;
+    m_hoveredApIndex    = -1;
+    m_keySelApIndex     = -1;
+    m_keySelApRow       = false;
+    m_apScrollOffset    = 0;
     if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
     CF_LOG(Info, "AP drill-down: depth=" << m_apNavStack.size()
            << " nodes=" << children.size());
 }
 
 void StartMenuWindow::NavigateBack() {
+    if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; }
+    m_hoverCandidate    = -1;
+    m_subMenuOpen       = false;
+    m_subMenuNodeIdx    = -1;
+    m_subMenuHoveredIdx = -1;
+
     if (!m_apNavStack.empty()) {
         m_apNavStack.pop_back();
         m_hoveredApIndex = -1;
@@ -1066,6 +1085,169 @@ void StartMenuWindow::NavigateBack() {
         CF_LOG(Info, "AP navigate back to Programs view");
     }
     if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
+}
+
+// ── Hover-to-open lateral submenu (S3.3) ─────────────────────────────────────
+void StartMenuWindow::OpenSubMenu(int apNodeIdx) {
+    const auto& nodes = CurrentApNodes();
+    if (apNodeIdx < 0 || apNodeIdx >= static_cast<int>(nodes.size())) return;
+    if (!nodes[static_cast<size_t>(apNodeIdx)].isFolder) return;
+
+    if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; }
+    m_hoverCandidate    = -1;
+    m_subMenuOpen       = true;
+    m_subMenuNodeIdx    = apNodeIdx;
+    m_subMenuHoveredIdx = -1;
+    CF_LOG(Info, "SubMenu opened for AP node " << apNodeIdx);
+    if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
+}
+
+void StartMenuWindow::CloseSubMenu() {
+    if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; }
+    m_hoverCandidate    = -1;
+    m_subMenuOpen       = false;
+    m_subMenuNodeIdx    = -1;
+    m_subMenuHoveredIdx = -1;
+    if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
+}
+
+bool StartMenuWindow::IsOverSubMenu(POINT pt) const {
+    if (!m_subMenuOpen) return false;
+    return pt.x >= DIVIDER_X && pt.x < WIDTH && pt.y >= 0 && pt.y < BOTTOM_BAR_Y;
+}
+
+int StartMenuWindow::GetSubMenuItemAtPoint(POINT pt) {
+    if (!m_subMenuOpen) return -1;
+    if (pt.x < SM_X || pt.x >= WIDTH - 2) return -1;
+    int relY = pt.y - SM_TITLE_H;
+    if (relY < 0) return -1;
+    int vis = relY / SM_ITEM_H;
+
+    const auto& nodes   = CurrentApNodes();
+    const auto& folder  = nodes[static_cast<size_t>(m_subMenuNodeIdx)];
+    int count = min(SM_MAX_VIS, static_cast<int>(folder.children.size()));
+    if (vis >= 0 && vis < count) return vis;
+    return -1;
+}
+
+void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
+    if (!m_subMenuOpen) return;
+    const auto& nodes  = CurrentApNodes();
+    const auto& folder = nodes[static_cast<size_t>(m_subMenuNodeIdx)];
+    int count = min(SM_MAX_VIS, static_cast<int>(folder.children.size()));
+
+    // Background panel
+    COLORREF panelColor = CalculateSubtleColor();
+    HBRUSH   panelBr    = CreateSolidBrush(panelColor);
+    RECT     panelR     = { DIVIDER_X, 0, cr.right, BOTTOM_BAR_Y };
+    FillRect(hdc, &panelR, panelBr);
+    DeleteObject(panelBr);
+
+    // Left border of panel
+    HPEN bdrPen = CreatePen(PS_SOLID, 1, CalculateBorderColor());
+    HPEN oldPen = (HPEN)SelectObject(hdc, bdrPen);
+    MoveToEx(hdc, DIVIDER_X, 0, NULL);
+    LineTo(hdc, DIVIDER_X, BOTTOM_BAR_Y);
+    SelectObject(hdc, oldPen);
+    DeleteObject(bdrPen);
+
+    SetBkMode(hdc, TRANSPARENT);
+
+    // Title — folder name
+    HFONT titleF = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HFONT oldF = (HFONT)SelectObject(hdc, titleF);
+    ::SetTextColor(hdc, m_textColor);
+    RECT tr = { SM_X, 0, cr.right - 4, SM_TITLE_H };
+    DrawTextW(hdc, folder.name.c_str(), -1, &tr,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawSeparator(hdc, SM_TITLE_H, SM_X, cr.right - 4);
+
+    // Items
+    HFONT itemF = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HFONT boldF = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+    for (int i = 0; i < count; ++i) {
+        const MenuNode& child = folder.children[static_cast<size_t>(i)];
+        int itemY = SM_TITLE_H + i * SM_ITEM_H;
+
+        if (i == m_subMenuHoveredIdx) {
+            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+            HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
+            HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
+            HPEN   op   = (HPEN)SelectObject(hdc, noPn);
+            RoundRect(hdc, SM_X, itemY + 2, cr.right - 4, itemY + SM_ITEM_H - 2, 6, 6);
+            SelectObject(hdc, ob);
+            SelectObject(hdc, op);
+            DeleteObject(hBr);
+        }
+
+        // Small icon
+        int iconCX = SM_X + 14;
+        int iconCY = itemY + SM_ITEM_H / 2;
+        if (child.isFolder) {
+            DrawIconSquare(hdc, iconCX, iconCY, 20, RGB(210, 150, 20), L"\u203a");
+            SelectObject(hdc, boldF);
+        } else {
+            DrawIconSquare(hdc, iconCX, iconCY, 20, RGB(30, 140, 130), L"\u00bb");
+            SelectObject(hdc, itemF);
+        }
+
+        ::SetTextColor(hdc, m_textColor);
+        RECT nr = { SM_X + 32, itemY, cr.right - 4, itemY + SM_ITEM_H };
+        DrawTextW(hdc, child.name.c_str(), -1, &nr,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+
+    if (count == 0) {
+        SelectObject(hdc, itemF);
+        ::SetTextColor(hdc, CalculateBorderColor());
+        RECT er = { SM_X, SM_TITLE_H + 8, cr.right - 4, SM_TITLE_H + SM_ITEM_H };
+        DrawTextW(hdc, L"(empty)", -1, &er, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    if (static_cast<int>(folder.children.size()) > SM_MAX_VIS) {
+        int lastY = SM_TITLE_H + count * SM_ITEM_H;
+        SelectObject(hdc, itemF);
+        ::SetTextColor(hdc, CalculateBorderColor());
+        RECT mr = { SM_X, lastY, cr.right - 4, lastY + SM_ITEM_H };
+        DrawTextW(hdc, L"\u25bc  more\u2026", -1, &mr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    SelectObject(hdc, oldF);
+    DeleteObject(titleF);
+    DeleteObject(itemF);
+    DeleteObject(boldF);
+}
+
+void StartMenuWindow::ExecuteSubMenuItem(int visualIdx) {
+    const auto& nodes  = CurrentApNodes();
+    const auto& folder = nodes[static_cast<size_t>(m_subMenuNodeIdx)];
+    if (visualIdx < 0 || visualIdx >= static_cast<int>(folder.children.size())) return;
+
+    const MenuNode& child = folder.children[static_cast<size_t>(visualIdx)];
+    if (child.isFolder) {
+        // Drill into sub-folder: close submenu, navigate main AP list into folder
+        CloseSubMenu();
+        NavigateIntoFolder(child.children);
+    } else {
+        CF_LOG(Info, "SubMenu launch: " << child.target.size() << " char target");
+        CloseSubMenu();
+        Hide();
+        if (!child.target.empty()) {
+            HINSTANCE hi = ShellExecuteW(NULL, L"open",
+                child.target.c_str(),
+                child.args.empty() ? nullptr : child.args.c_str(),
+                nullptr, SW_SHOW);
+            if (reinterpret_cast<INT_PTR>(hi) <= 32)
+                CF_LOG(Warning, "SubMenu ShellExecuteW returned " << reinterpret_cast<INT_PTR>(hi));
+        }
+    }
 }
 
 // ── Power menu ────────────────────────────────────────────────────────────────
@@ -1141,6 +1323,52 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         int  nrc    = GetRightItemAtPoint(pt);
         bool npwr   = IsOverPowerButton(pt);
 
+        // ── Hover-timer management (S3.3) ────────────────────────────────────
+        if (m_viewMode == LeftViewMode::AllPrograms) {
+            bool overFolder = false;
+            if (nAp >= 0) {
+                const auto& nodes = CurrentApNodes();
+                overFolder = nodes[static_cast<size_t>(nAp)].isFolder;
+            }
+            if (overFolder) {
+                if (m_subMenuOpen && m_subMenuNodeIdx == nAp) {
+                    // Same folder as open submenu — just update submenu hover
+                    int smHov = GetSubMenuItemAtPoint(pt);
+                    if (smHov != m_subMenuHoveredIdx) {
+                        m_subMenuHoveredIdx = smHov;
+                        InvalidateRect(m_hwnd, NULL, FALSE);
+                    }
+                } else if (nAp != m_hoverCandidate) {
+                    // Different folder — cancel old timer, start new one
+                    if (m_subMenuOpen) CloseSubMenu();
+                    if (m_hoverTimer) KillTimer(m_hwnd, HOVER_TIMER_ID);
+                    m_hoverCandidate = nAp;
+                    m_hoverTimer     = SetTimer(m_hwnd, HOVER_TIMER_ID, HOVER_DELAY_MS, NULL);
+                }
+            } else if (m_subMenuOpen && IsOverSubMenu(pt)) {
+                // Mouse is in the open submenu panel — update submenu hover
+                int smHov = GetSubMenuItemAtPoint(pt);
+                if (smHov != m_subMenuHoveredIdx) {
+                    m_subMenuHoveredIdx = smHov;
+                    InvalidateRect(m_hwnd, NULL, FALSE);
+                }
+            } else {
+                // Not over a folder and not in submenu — cancel timer; close submenu
+                if (m_hoverTimer && nAp != m_hoverCandidate) {
+                    KillTimer(m_hwnd, HOVER_TIMER_ID);
+                    m_hoverTimer     = 0;
+                    m_hoverCandidate = -1;
+                }
+                if (m_subMenuOpen && !IsOverSubMenu(pt)) {
+                    CloseSubMenu();
+                }
+            }
+        } else if (m_viewMode == LeftViewMode::Programs) {
+            // Programs view — ensure any lingering submenu/timer is cleared
+            if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; m_hoverCandidate = -1; }
+            if (m_subMenuOpen) CloseSubMenu();
+        }
+
         // Mouse movement clears keyboard selection (modes are mutually exclusive)
         bool hadKeySel = (m_keySelProgIndex >= 0 || m_keySelApRow || m_keySelApIndex >= 0);
 
@@ -1172,11 +1400,21 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         m_hoveredApIndex    = -1;
         m_hoveredRightIndex = -1;
         m_hoveredPower      = false;
-        InvalidateRect(m_hwnd, NULL, FALSE);
+        if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; m_hoverCandidate = -1; }
+        if (m_subMenuOpen)  CloseSubMenu();
+        else InvalidateRect(m_hwnd, NULL, FALSE);
         return 0;
 
     case WM_LBUTTONDOWN: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+
+        // Submenu click (when open, intercepts the right column area)
+        if (m_subMenuOpen && IsOverSubMenu(pt)) {
+            int smIdx = GetSubMenuItemAtPoint(pt);
+            if (smIdx >= 0) ExecuteSubMenuItem(smIdx);
+            else CloseSubMenu();   // click in panel but not on an item → close
+            return 0;
+        }
 
         // Right column — Win7 shell links (checked first when x > DIVIDER_X)
         int rc = GetRightItemAtPoint(pt);
@@ -1222,7 +1460,9 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE) {
-            if (m_viewMode == LeftViewMode::AllPrograms)
+            if (m_subMenuOpen)
+                CloseSubMenu();
+            else if (m_viewMode == LeftViewMode::AllPrograms)
                 NavigateBack();
             else
                 Hide();
@@ -1324,6 +1564,16 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
 
+        return 0;
+
+    case WM_TIMER:
+        if (wParam == HOVER_TIMER_ID) {
+            KillTimer(m_hwnd, HOVER_TIMER_ID);
+            m_hoverTimer = 0;
+            if (m_hoverCandidate >= 0 && m_viewMode == LeftViewMode::AllPrograms)
+                OpenSubMenu(m_hoverCandidate);
+            m_hoverCandidate = -1;
+        }
         return 0;
 
     case WM_MOUSEWHEEL: {

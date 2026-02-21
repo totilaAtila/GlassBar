@@ -22,8 +22,10 @@ struct MenuNode {
 /// <summary>
 /// Resolve a .lnk or .url file to a launchable target and optional arguments.
 ///
-/// Precondition: COM must be initialised on the calling thread
-///               (CoInitializeEx already called — satisfied by main.cpp).
+/// Precondition: COM must be initialised on the calling thread when resolving
+///               .lnk files (CoCreateInstance is used).  BuildAllProgramsTree()
+///               initialises COM itself, so this precondition is satisfied when
+///               called from there.  Direct callers must ensure COM is ready.
 ///
 /// .lnk  → IShellLinkW::GetPath / GetArguments
 /// .url  → GetPrivateProfileStringW "URL=" key from [InternetShortcut]
@@ -45,7 +47,11 @@ bool ResolveShortcutTarget(const std::wstring& path,
 ///   • Same-name shortcuts: the user-profile version wins.
 ///   • Sort order: folders first (alpha), then shortcuts (alpha), both case-insensitive.
 ///
-/// Precondition: COM initialised on calling thread.
+/// COM: this function calls CoInitializeEx(COINIT_APARTMENTTHREADED) and
+///      always balances it with CoUninitialize() on exit for any successful
+///      return (S_OK or S_FALSE — both increment the reference count per MSDN).
+///      RPC_E_CHANGED_MODE (different apartment already active) is tolerated
+///      and requires no balancing call.
 /// </summary>
 std::vector<MenuNode> BuildAllProgramsTree();
 

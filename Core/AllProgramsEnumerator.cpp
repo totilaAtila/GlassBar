@@ -184,6 +184,34 @@ static void MergeTree(std::vector<MenuNode>& base, std::vector<MenuNode>&& overl
 // ── BuildAllProgramsTree ──────────────────────────────────────────────────────
 
 std::vector<MenuNode> BuildAllProgramsTree() {
+    // Ensure COM is initialised on this thread so that IShellLinkW can be
+    // created for every .lnk we encounter.  Per MSDN, every successful
+    // CoInitializeEx call — including S_FALSE — increments the reference count
+    // and must be balanced by CoUninitialize().
+    //   S_OK              — fresh init; SUCCEEDED() → CoUninitialize on exit.
+    //   S_FALSE           — already init (same apt); still increments refcount
+    //                       → SUCCEEDED() → CoUninitialize on exit.
+    //   RPC_E_CHANGED_MODE — different apartment already active; FAILED() so no
+    //                        CoUninitialize needed; CoCreateInstance still works
+    //                        for in-process servers (CLSID_ShellLink).
+    // Any other FAILED code means COM is unusable on this thread — bail out.
+    HRESULT hrCom    = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+    if (FAILED(hrCom) && hrCom != RPC_E_CHANGED_MODE) {
+        CF_LOG(Warning, "BuildAllProgramsTree: CoInitializeEx failed hr=0x"
+               << std::hex << hrCom << " — aborting tree build");
+        return {};
+    }
+
+    // Balance every successful CoInitializeEx call — both S_OK (we initialised
+    // COM fresh) and S_FALSE (COM was already up on this thread but the call still
+    // increments the reference count) require a matching CoUninitialize().
+    // RPC_E_CHANGED_MODE is FAILED, so SUCCEEDED() correctly excludes it.
+    struct ComGuard {
+        bool active;
+        ~ComGuard() { if (active) CoUninitialize(); }
+    } comGuard{ SUCCEEDED(hrCom) };
+
     std::vector<MenuNode> tree;
 
     // 1. Common programs (%ProgramData%\Microsoft\Windows\Start Menu\Programs)

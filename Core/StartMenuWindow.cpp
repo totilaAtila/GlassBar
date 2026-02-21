@@ -19,8 +19,8 @@
 
 namespace CrystalFrame {
 
-// ── Pinned apps (2 × 3 grid, left column) ────────────────────────────────────
-const PinnedItem StartMenuWindow::s_pinnedItems[StartMenuWindow::PINNED_COUNT] = {
+// ── Pinned apps (vertical list, left column) ──────────────────────────────────
+const PinnedItem StartMenuWindow::s_pinnedItems[StartMenuWindow::PROG_COUNT] = {
     { L"Settings",       L"Set",  L"ms-settings:",     RGB(  0, 103, 192) },
     { L"File Explorer",  L"Exp",  L"explorer.exe",     RGB(255, 185,   0) },
     { L"Edge",           L"Edge", L"msedge.exe",       RGB(  0, 120, 215) },
@@ -243,11 +243,15 @@ void StartMenuWindow::Show(int x, int y) {
 void StartMenuWindow::Hide() {
     if (m_hwnd && m_visible) {
         ShowWindow(m_hwnd, SW_HIDE);
-        m_visible                 = false;
-        m_hoveredPinnedIndex      = -1;
-        m_hoveredRecommendedIndex = -1;
-        m_hoveredRightIndex       = -1;
-        m_hoveredPower            = false;
+        m_visible          = false;
+        // Reset to Programs view on every hide
+        m_viewMode         = LeftViewMode::Programs;
+        m_apNavStack.clear();
+        m_hoveredProgIndex = -1;
+        m_hoveredApRow     = false;
+        m_hoveredApIndex   = -1;
+        m_hoveredRightIndex = -1;
+        m_hoveredPower     = false;
         CF_LOG(Info, "StartMenuWindow::Hide");
     }
 }
@@ -289,7 +293,7 @@ void StartMenuWindow::SetMenuItems(bool controlPanel, bool deviceManager,
     m_menuItems[4].visible = pictures;
     m_menuItems[5].visible = videos;
     m_menuItems[6].visible = recentFiles;
-    if (m_visible) InvalidateRect(m_hwnd, NULL, FALSE);
+    // Win7 mode does not render the recommended section, so no invalidate needed.
 }
 
 // ── Transparency ─────────────────────────────────────────────────────────────
@@ -368,14 +372,14 @@ void StartMenuWindow::DrawIconSquare(HDC hdc, int cx, int cy, int sz,
     HPEN   noPen  = (HPEN)GetStockObject(NULL_PEN);
     HBRUSH oldBr  = (HBRUSH)SelectObject(hdc, icoBr);
     HPEN   oldPen = (HPEN)SelectObject(hdc, noPen);
-    RoundRect(hdc, x1, y1, x2, y2, 10, 10);
+    RoundRect(hdc, x1, y1, x2, y2, 6, 6);
     SelectObject(hdc, oldBr);
     SelectObject(hdc, oldPen);
     DeleteObject(icoBr);
 
     if (label && label[0]) {
         HFONT font = CreateFontW(
-            14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         HFONT oldFont = (HFONT)SelectObject(hdc, font);
@@ -398,25 +402,196 @@ void StartMenuWindow::DrawSeparator(HDC hdc, int y, int x1, int x2) {
     DeleteObject(pen);
 }
 
-// ── PaintSearchBox (left column) ──────────────────────────────────────────────
-void StartMenuWindow::PaintSearchBox(HDC hdc, const RECT& cr) {
-    // Clip search box to left column
-    int bx1 = MARGIN, by1 = SEARCH_Y;
+// ─────────────────────────────────────────────────────────────────────────────
+// PaintProgramsList — Win7-style vertical list of pinned apps (left column)
+// Each row: [colored icon square 24×24] [app name]
+// ─────────────────────────────────────────────────────────────────────────────
+void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
+    (void)cr;
+    SetBkMode(hdc, TRANSPARENT);
+
+    HFONT nameFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HFONT oldF = (HFONT)SelectObject(hdc, nameFont);
+
+    for (int i = 0; i < PROG_COUNT; ++i) {
+        int itemY = PROG_Y + i * PROG_ITEM_H;
+
+        // Hover highlight
+        if (i == m_hoveredProgIndex) {
+            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+            HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
+            HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
+            HPEN   op   = (HPEN)SelectObject(hdc, noPn);
+            RoundRect(hdc, MARGIN, itemY + 2,
+                      DIVIDER_X - MARGIN, itemY + PROG_ITEM_H - 2, 6, 6);
+            SelectObject(hdc, ob);
+            SelectObject(hdc, op);
+            DeleteObject(hBr);
+        }
+
+        // Icon square (centred vertically in the row)
+        int iconCX = MARGIN + PROG_ICON_SZ / 2 + 4;
+        int iconCY = itemY + PROG_ITEM_H / 2;
+        DrawIconSquare(hdc, iconCX, iconCY, PROG_ICON_SZ,
+                       s_pinnedItems[i].iconColor, s_pinnedItems[i].shortName);
+
+        // App name
+        ::SetTextColor(hdc, m_textColor);
+        RECT nr = { MARGIN + PROG_ICON_SZ + 12, itemY,
+                    DIVIDER_X - MARGIN,          itemY + PROG_ITEM_H };
+        DrawTextW(hdc, s_pinnedItems[i].name, -1, &nr,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+
+    SelectObject(hdc, oldF);
+    DeleteObject(nameFont);
+
+    // Thin separator below programs list
+    int sepY = PROG_Y + PROG_COUNT * PROG_ITEM_H + 4;
+    if (sepY < AP_ROW_Y)
+        DrawSeparator(hdc, sepY, MARGIN, DIVIDER_X - MARGIN);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PaintAllProgramsView — shows the current level of the All Programs tree
+// (left column, replacing the pinned list when m_viewMode == AllPrograms)
+// ─────────────────────────────────────────────────────────────────────────────
+void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
+    (void)cr;
+    SetBkMode(hdc, TRANSPARENT);
+
+    const auto& nodes = CurrentApNodes();
+
+    HFONT nameFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HFONT boldFont = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HFONT oldF = (HFONT)SelectObject(hdc, nameFont);
+
+    int count = min(static_cast<int>(nodes.size()), AP_MAX_VISIBLE);
+
+    for (int i = 0; i < count; ++i) {
+        const MenuNode& node  = nodes[static_cast<size_t>(i)];
+        int             itemY = PROG_Y + i * PROG_ITEM_H;
+
+        // Hover highlight
+        if (i == m_hoveredApIndex) {
+            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+            HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
+            HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
+            HPEN   op   = (HPEN)SelectObject(hdc, noPn);
+            RoundRect(hdc, MARGIN, itemY + 2,
+                      DIVIDER_X - MARGIN, itemY + PROG_ITEM_H - 2, 6, 6);
+            SelectObject(hdc, ob);
+            SelectObject(hdc, op);
+            DeleteObject(hBr);
+        }
+
+        int iconCX = MARGIN + PROG_ICON_SZ / 2 + 4;
+        int iconCY = itemY + PROG_ITEM_H / 2;
+
+        if (node.isFolder) {
+            // Folder: amber icon with "›" glyph
+            DrawIconSquare(hdc, iconCX, iconCY, PROG_ICON_SZ,
+                           RGB(210, 150, 20), L"\u203a");
+            SelectObject(hdc, boldFont);
+        } else {
+            // Shortcut: teal icon with "»" glyph
+            DrawIconSquare(hdc, iconCX, iconCY, PROG_ICON_SZ,
+                           RGB(30, 140, 130), L"\u00bb");
+            SelectObject(hdc, nameFont);
+        }
+
+        ::SetTextColor(hdc, m_textColor);
+        RECT nr = { MARGIN + PROG_ICON_SZ + 12, itemY,
+                    DIVIDER_X - MARGIN,          itemY + PROG_ITEM_H };
+        DrawTextW(hdc, node.name.c_str(), -1, &nr,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+
+    // Hint if more items exist than we can show
+    if (static_cast<int>(nodes.size()) > AP_MAX_VISIBLE) {
+        int lastY = PROG_Y + AP_MAX_VISIBLE * PROG_ITEM_H;
+        SelectObject(hdc, nameFont);
+        ::SetTextColor(hdc, CalculateBorderColor());
+        RECT mr = { MARGIN, lastY, DIVIDER_X - MARGIN, AP_ROW_Y };
+        DrawTextW(hdc, L"▼  more…", -1, &mr,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    SelectObject(hdc, oldF);
+    DeleteObject(nameFont);
+    DeleteObject(boldFont);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PaintApRow — "All Programs ›" (Programs view) or "◄ Back" (AllPrograms view)
+// Positioned at AP_ROW_Y, height AP_ROW_H.  Acts as a separator above the
+// search box; draws a thin rule above itself.
+// ─────────────────────────────────────────────────────────────────────────────
+void StartMenuWindow::PaintApRow(HDC hdc, const RECT& cr) {
+    (void)cr;
+
+    // Thin rule above the row
+    DrawSeparator(hdc, AP_ROW_Y - 1, MARGIN, DIVIDER_X - MARGIN);
+
+    // Hover highlight
+    if (m_hoveredApRow) {
+        HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+        HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
+        HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
+        HPEN   op   = (HPEN)SelectObject(hdc, noPn);
+        RoundRect(hdc, MARGIN, AP_ROW_Y + 1,
+                  DIVIDER_X - MARGIN, AP_ROW_Y + AP_ROW_H - 1, 4, 4);
+        SelectObject(hdc, ob);
+        SelectObject(hdc, op);
+        DeleteObject(hBr);
+    }
+
+    HFONT rowFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HFONT oldF = (HFONT)SelectObject(hdc, rowFont);
+    ::SetTextColor(hdc, m_textColor);
+    SetBkMode(hdc, TRANSPARENT);
+
+    const wchar_t* label = (m_viewMode == LeftViewMode::AllPrograms)
+                           ? L"\u25c4  Back"
+                           : L"All Programs  \u203a";
+
+    RECT tr = { MARGIN + 6, AP_ROW_Y, DIVIDER_X - MARGIN, AP_ROW_Y + AP_ROW_H };
+    DrawTextW(hdc, label, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    SelectObject(hdc, oldF);
+    DeleteObject(rowFont);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PaintWin7SearchBox — Win7 style: sits at the bottom of the left column,
+// just above the bottom bar.  (Moved from top to bottom per Win7 design.)
+// ─────────────────────────────────────────────────────────────────────────────
+void StartMenuWindow::PaintWin7SearchBox(HDC hdc, const RECT& cr) {
+    (void)cr;
+
+    int bx1 = MARGIN,             by1 = SEARCH_Y;
     int bx2 = DIVIDER_X - MARGIN, by2 = SEARCH_Y + SEARCH_H;
-    (void)cr; // right edge determined by DIVIDER_X, not cr.right
 
     HBRUSH srBr  = CreateSolidBrush(CalculateSubtleColor());
     HPEN   srPen = CreatePen(PS_SOLID, 1, CalculateBorderColor());
     HBRUSH oldBr = (HBRUSH)SelectObject(hdc, srBr);
     HPEN   oldPn = (HPEN)SelectObject(hdc, srPen);
-    RoundRect(hdc, bx1, by1, bx2, by2, 8, 8);
+    RoundRect(hdc, bx1, by1, bx2, by2, 6, 6);
     SelectObject(hdc, oldBr);
     SelectObject(hdc, oldPn);
     DeleteObject(srBr);
     DeleteObject(srPen);
 
     // Magnifier icon
-    int icoX = bx1 + 22, icoY = (by1 + by2) / 2, icoR = 7;
+    int icoX = bx1 + 18, icoY = (by1 + by2) / 2, icoR = 6;
     HPEN mgPen = CreatePen(PS_SOLID, 2, RGB(155, 155, 165));
     HPEN oldP2 = (HPEN)SelectObject(hdc, mgPen);
     HBRUSH nb  = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
@@ -428,161 +603,17 @@ void StartMenuWindow::PaintSearchBox(HDC hdc, const RECT& cr) {
     DeleteObject(mgPen);
 
     // Placeholder text
-    HFONT ph = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    HFONT ph = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, ph);
     ::SetTextColor(hdc, RGB(135, 135, 145));
     SetBkMode(hdc, TRANSPARENT);
-    RECT tr = { bx1 + 42, by1, bx2 - 10, by2 };
+    RECT tr = { bx1 + 34, by1, bx2 - 8, by2 };
     DrawTextW(hdc, L"Search programs and files",
               -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     SelectObject(hdc, oldF);
     DeleteObject(ph);
-}
-
-// ── PaintPinnedSection (left column) ─────────────────────────────────────────
-void StartMenuWindow::PaintPinnedSection(HDC hdc, const RECT& cr) {
-    (void)cr;
-    SetBkMode(hdc, TRANSPARENT);
-
-    HFONT hdrFont = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT lblFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-    // "Pinned" header — left half of left column
-    HFONT oldF = (HFONT)SelectObject(hdc, hdrFont);
-    ::SetTextColor(hdc, m_textColor);
-    RECT hdrL = { MARGIN, PINNED_HEADER_Y, DIVIDER_X / 2, PINNED_HEADER_Y + 22 };
-    DrawTextW(hdc, L"Pinned", -1, &hdrL, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-    // "All apps ›" — right half of left column
-    ::SetTextColor(hdc, RGB(130, 155, 200));
-    RECT hdrR = { DIVIDER_X / 2, PINNED_HEADER_Y,
-                  DIVIDER_X - MARGIN, PINNED_HEADER_Y + 22 };
-    DrawTextW(hdc, L"All apps  \u203a", -1, &hdrR,
-              DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-
-    // Grid items
-    for (int i = 0; i < PINNED_COUNT; ++i) {
-        int col   = i % PINNED_COLS;
-        int row   = i / PINNED_COLS;
-        int cellX = MARGIN + col * PINNED_CELL_W;
-        int cellY = PINNED_GRID_Y + row * PINNED_CELL_H;
-        int cx    = cellX + PINNED_CELL_W / 2;
-        int cy    = cellY + PINNED_ICON_SZ / 2 + 8;
-
-        if (i == m_hoveredPinnedIndex) {
-            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
-            HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
-            HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
-            HPEN   op   = (HPEN)SelectObject(hdc, noPn);
-            RoundRect(hdc, cellX + 4, cellY + 4,
-                      cellX + PINNED_CELL_W - 4, cellY + PINNED_CELL_H - 4,
-                      10, 10);
-            SelectObject(hdc, ob);
-            SelectObject(hdc, op);
-            DeleteObject(hBr);
-        }
-
-        DrawIconSquare(hdc, cx, cy, PINNED_ICON_SZ,
-                       s_pinnedItems[i].iconColor,
-                       s_pinnedItems[i].shortName);
-
-        SelectObject(hdc, lblFont);
-        ::SetTextColor(hdc, m_textColor);
-        int labelY = cellY + PINNED_ICON_SZ + 16;
-        RECT nr = { cellX + 4, labelY,
-                    cellX + PINNED_CELL_W - 4, labelY + 18 };
-        DrawTextW(hdc, s_pinnedItems[i].name, -1, &nr,
-                  DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    }
-
-    SelectObject(hdc, oldF);
-    DeleteObject(hdrFont);
-    DeleteObject(lblFont);
-
-    // Divider below grid (left column only)
-    DrawSeparator(hdc, PINNED_GRID_END + 6, MARGIN, DIVIDER_X - MARGIN);
-}
-
-// ── PaintRecommendedSection (left column) ────────────────────────────────────
-void StartMenuWindow::PaintRecommendedSection(HDC hdc, const RECT& cr) {
-    (void)cr;
-    SetBkMode(hdc, TRANSPARENT);
-
-    HFONT hdrFont = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT itmFont = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-    // "Recommended" header — left half of left column
-    HFONT oldF = (HFONT)SelectObject(hdc, hdrFont);
-    ::SetTextColor(hdc, m_textColor);
-    RECT hl = { MARGIN, REC_HEADER_Y, DIVIDER_X / 2, REC_HEADER_Y + 22 };
-    DrawTextW(hdc, L"Recommended", -1, &hl, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-    ::SetTextColor(hdc, RGB(130, 155, 200));
-    RECT hr = { DIVIDER_X / 2, REC_HEADER_Y,
-                DIVIDER_X - MARGIN, REC_HEADER_Y + 22 };
-    DrawTextW(hdc, L"More  \u203a", -1, &hr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-
-    static const COLORREF recColors[7] = {
-        RGB(  0, 120, 215), RGB(  0, 150, 130), RGB( 70, 130, 180),
-        RGB(200, 100,  20), RGB(100, 180,  50), RGB(180,  50, 100),
-        RGB(150, 100, 200)
-    };
-
-    // Two-column layout inside left column
-    int colW   = (DIVIDER_X - 2 * MARGIN) / 2;
-    int visIdx = 0;
-
-    for (int i = 0; i < 7 && visIdx < 4; ++i) {
-        if (!m_menuItems[i].visible) continue;
-
-        int col   = visIdx % 2;
-        int row   = visIdx / 2;
-        int itemX = MARGIN + col * colW;
-        int itemY = REC_START_Y + row * REC_ITEM_H;
-
-        if (i == m_hoveredRecommendedIndex) {
-            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
-            HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
-            HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
-            HPEN   op   = (HPEN)SelectObject(hdc, noPn);
-            RoundRect(hdc, itemX + 2, itemY + 2,
-                      itemX + colW - 2, itemY + REC_ITEM_H - 2,
-                      8, 8);
-            SelectObject(hdc, ob);
-            SelectObject(hdc, op);
-            DeleteObject(hBr);
-        }
-
-        int iconCX = itemX + 20;
-        int iconCY = itemY + REC_ITEM_H / 2;
-        DrawIconSquare(hdc, iconCX, iconCY, 24, recColors[i], L"");
-
-        SelectObject(hdc, itmFont);
-        ::SetTextColor(hdc, m_textColor);
-        RECT nr = { itemX + 36, itemY,
-                    itemX + colW - 6, itemY + REC_ITEM_H };
-        DrawTextW(hdc, GetMenuItemName(i), -1, &nr,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-        ++visIdx;
-    }
-
-    SelectObject(hdc, oldF);
-    DeleteObject(hdrFont);
-    DeleteObject(itmFont);
-
-    // Divider above bottom bar (full width)
-    DrawSeparator(hdc, BOTTOM_BAR_Y - 1, MARGIN, WIDTH - MARGIN);
 }
 
 // ── PaintWin7RightColumn ──────────────────────────────────────────────────────
@@ -695,10 +726,13 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
     FillRect(hdc, &bbR, bbBr);
     DeleteObject(bbBr);
 
-    int barCY = BOTTOM_BAR_Y + (cr.bottom - BOTTOM_BAR_Y) / 2;
+    // Thin rule at top of bottom bar
+    DrawSeparator(hdc, BOTTOM_BAR_Y, MARGIN, WIDTH - MARGIN);
+
+    int barCY = BOTTOM_BAR_Y + BOTTOM_BAR_H / 2;
 
     // ── Avatar circle (left side) ──
-    int avCX = MARGIN + 18, avR = 16;
+    int avCX = MARGIN + 14, avR = 13;
     HBRUSH avBr  = CreateSolidBrush(RGB(0, 103, 192));
     HPEN   noPen = (HPEN)GetStockObject(NULL_PEN);
     HBRUSH oldBr = (HBRUSH)SelectObject(hdc, avBr);
@@ -708,7 +742,7 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
     SelectObject(hdc, oldPn);
     DeleteObject(avBr);
 
-    HFONT initF = CreateFontW(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    HFONT initF = CreateFontW(12, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, initF);
@@ -718,12 +752,12 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
     DrawTextW(hdc, initial, 1, &avTR, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     // ── "User" label ──
-    HFONT nmF = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    HFONT nmF = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     SelectObject(hdc, nmF);
     ::SetTextColor(hdc, m_textColor);
-    RECT nmR = { avCX + avR + 8, BOTTOM_BAR_Y, DIVIDER_X - MARGIN, cr.bottom };
+    RECT nmR = { avCX + avR + 6, BOTTOM_BAR_Y, DIVIDER_X - MARGIN, cr.bottom };
     DrawTextW(hdc, m_username, -1, &nmR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     // ── Power button (right side) ──
@@ -745,7 +779,7 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
     HPEN pwrPen  = CreatePen(PS_SOLID, 2, pwrCol);
     HPEN oldPen2 = (HPEN)SelectObject(hdc, pwrPen);
     HBRUSH nb2   = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    int ar = POWER_BTN_R - 4;
+    int ar = POWER_BTN_R - 3;
     Arc(hdc,
         pwrCX - ar, pwrCY - ar, pwrCX + ar, pwrCY + ar,
         pwrCX - ar + 3, pwrCY - ar,
@@ -769,7 +803,7 @@ void StartMenuWindow::Paint() {
     RECT cr;
     GetClientRect(m_hwnd, &cr);
 
-    // Background (left column area)
+    // Background (whole window)
     HBRUSH bg = CreateSolidBrush(m_bgColor);
     FillRect(hdc, &cr, bg);
     DeleteObject(bg);
@@ -783,45 +817,47 @@ void StartMenuWindow::Paint() {
     SelectObject(hdc, nb);
     DeleteObject(bdrPen);
 
-    PaintSearchBox(hdc, cr);
-    PaintPinnedSection(hdc, cr);
-    PaintRecommendedSection(hdc, cr);
-    PaintWin7RightColumn(hdc, cr);   // Win7 right column (drawn after left sections)
+    // Left column — programs or All Programs tree
+    if (m_viewMode == LeftViewMode::Programs)
+        PaintProgramsList(hdc, cr);
+    else
+        PaintAllProgramsView(hdc, cr);
+
+    // Left column — "All Programs" / "Back" row + search box (always visible)
+    PaintApRow(hdc, cr);
+    PaintWin7SearchBox(hdc, cr);
+
+    // Right column and bottom bar (always visible)
+    PaintWin7RightColumn(hdc, cr);
     PaintBottomBar(hdc, cr);
 
     EndPaint(m_hwnd, &ps);
 }
 
 // ── Hit testing ───────────────────────────────────────────────────────────────
-int StartMenuWindow::GetPinnedItemAtPoint(POINT pt) {
-    for (int i = 0; i < PINNED_COUNT; ++i) {
-        int col   = i % PINNED_COLS;
-        int row   = i / PINNED_COLS;
-        int cellX = MARGIN + col * PINNED_CELL_W;
-        int cellY = PINNED_GRID_Y + row * PINNED_CELL_H;
-        RECT r = { cellX + 4, cellY + 4,
-                   cellX + PINNED_CELL_W - 4,
-                   cellY + PINNED_CELL_H - 4 };
-        if (PtInRect(&r, pt)) return i;
-    }
+
+// Returns the pinned item index at pt (Programs view), or -1.
+int StartMenuWindow::GetProgItemAtPoint(POINT pt) {
+    if (pt.x < MARGIN || pt.x >= DIVIDER_X - MARGIN) return -1;
+    if (pt.y < PROG_Y || pt.y >= PROG_Y + PROG_COUNT * PROG_ITEM_H) return -1;
+    int idx = (pt.y - PROG_Y) / PROG_ITEM_H;
+    if (idx >= 0 && idx < PROG_COUNT) return idx;
     return -1;
 }
 
-int StartMenuWindow::GetRecommendedItemAtPoint(POINT pt) {
-    if (pt.x >= DIVIDER_X) return -1;  // right column — not recommended
-    int colW   = (DIVIDER_X - 2 * MARGIN) / 2;
-    int visIdx = 0;
-    for (int i = 0; i < 7 && visIdx < 4; ++i) {
-        if (!m_menuItems[i].visible) continue;
-        int col   = visIdx % 2;
-        int row   = visIdx / 2;
-        int itemX = MARGIN + col * colW;
-        int itemY = REC_START_Y + row * REC_ITEM_H;
-        RECT r = { itemX + 2, itemY + 2,
-                   itemX + colW - 2, itemY + REC_ITEM_H - 2 };
-        if (PtInRect(&r, pt)) return i;
-        ++visIdx;
-    }
+// Returns true if pt is over the "All Programs" / "Back" row.
+bool StartMenuWindow::IsOverApRow(POINT pt) {
+    if (pt.x >= DIVIDER_X) return false;
+    return pt.y >= AP_ROW_Y && pt.y < AP_ROW_Y + AP_ROW_H;
+}
+
+// Returns the All Programs list item index at pt, or -1.
+int StartMenuWindow::GetApItemAtPoint(POINT pt) {
+    if (pt.x < MARGIN || pt.x >= DIVIDER_X - MARGIN) return -1;
+    if (pt.y < PROG_Y || pt.y >= AP_ROW_Y) return -1;
+    int idx = (pt.y - PROG_Y) / PROG_ITEM_H;
+    int count = min(static_cast<int>(CurrentApNodes().size()), AP_MAX_VISIBLE);
+    if (idx >= 0 && idx < count) return idx;
     return -1;
 }
 
@@ -829,7 +865,7 @@ bool StartMenuWindow::IsOverPowerButton(POINT pt) {
     RECT cr;
     GetClientRect(m_hwnd, &cr);
     int pwrCX = cr.right - MARGIN - POWER_BTN_R;
-    int barCY = BOTTOM_BAR_Y + (cr.bottom - BOTTOM_BAR_Y) / 2;
+    int barCY = BOTTOM_BAR_Y + BOTTOM_BAR_H / 2;
     int dx = pt.x - pwrCX, dy = pt.y - barCY;
     return (dx * dx + dy * dy) <= (POWER_BTN_R + 6) * (POWER_BTN_R + 6);
 }
@@ -857,7 +893,7 @@ int StartMenuWindow::GetRightItemAtPoint(POINT pt) {
 
 // ── Execution ─────────────────────────────────────────────────────────────────
 void StartMenuWindow::ExecutePinnedItem(int index) {
-    if (index < 0 || index >= PINNED_COUNT) return;
+    if (index < 0 || index >= PROG_COUNT) return;
     CF_LOG(Info, "ExecutePinnedItem: " << index);
     ShellExecuteW(NULL, L"open", s_pinnedItems[index].command, NULL, NULL, SW_SHOW);
     Hide();
@@ -922,6 +958,69 @@ void StartMenuWindow::ExecuteRightItem(int index) {
     }
 }
 
+// LaunchApItem ────────────────────────────────────────────────────────────────
+// Launches the shortcut at index in CurrentApNodes().
+// If the node is a folder, navigates into it instead of launching.
+void StartMenuWindow::LaunchApItem(int index) {
+    const auto& nodes = CurrentApNodes();
+    if (index < 0 || index >= static_cast<int>(nodes.size())) return;
+
+    const MenuNode& node = nodes[static_cast<size_t>(index)];
+
+    if (node.isFolder) {
+        CF_LOG(Info, "AP navigate into folder: " << index);
+        NavigateIntoFolder(node.children);
+        return;
+    }
+
+    CF_LOG(Info, "AP launch: index=" << index);
+    Hide();
+
+    if (!node.target.empty()) {
+        HINSTANCE hi = ShellExecuteW(
+            NULL, L"open",
+            node.target.c_str(),
+            node.args.empty() ? nullptr : node.args.c_str(),
+            nullptr, SW_SHOW);
+        if (reinterpret_cast<INT_PTR>(hi) <= 32) {
+            CF_LOG(Warning, "ShellExecuteW(AP item) returned "
+                   << reinterpret_cast<INT_PTR>(hi)
+                   << " target=" << node.target.size() << " chars");
+        }
+    } else {
+        CF_LOG(Warning, "AP item has no target: index=" << index);
+    }
+}
+
+// ── All Programs navigation ───────────────────────────────────────────────────
+
+const std::vector<MenuNode>& StartMenuWindow::CurrentApNodes() const {
+    if (m_apNavStack.empty()) return m_programTree;
+    return *m_apNavStack.back();
+}
+
+void StartMenuWindow::NavigateIntoFolder(const std::vector<MenuNode>& children) {
+    m_apNavStack.push_back(&children);
+    m_hoveredApIndex = -1;
+    if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
+    CF_LOG(Info, "AP drill-down: depth=" << m_apNavStack.size()
+           << " nodes=" << children.size());
+}
+
+void StartMenuWindow::NavigateBack() {
+    if (!m_apNavStack.empty()) {
+        m_apNavStack.pop_back();
+        m_hoveredApIndex = -1;
+        CF_LOG(Info, "AP navigate back: depth=" << m_apNavStack.size());
+    } else {
+        // Already at root All Programs level — return to Programs view
+        m_viewMode         = LeftViewMode::Programs;
+        m_hoveredProgIndex = -1;
+        CF_LOG(Info, "AP navigate back to Programs view");
+    }
+    if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
+}
+
 // ── Power menu ────────────────────────────────────────────────────────────────
 void StartMenuWindow::ShowPowerMenu() {
     HMENU menu = CreatePopupMenu();
@@ -936,7 +1035,7 @@ void StartMenuWindow::ShowPowerMenu() {
     RECT wr = {};
     GetWindowRect(m_hwnd, &wr);
     int x = wr.right  - MARGIN - POWER_BTN_R * 2;
-    int y = wr.bottom - 62;
+    int y = wr.bottom - BOTTOM_BAR_H - 4;
 
     SetForegroundWindow(m_hwnd);
     int cmd = TrackPopupMenu(menu, TPM_RIGHTALIGN | TPM_BOTTOMALIGN | TPM_RETURNCMD,
@@ -986,29 +1085,37 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             m_trackingMouse = true;
         }
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-        int  np   = GetPinnedItemAtPoint(pt);
-        int  nr   = GetRecommendedItemAtPoint(pt);
-        int  nrc  = GetRightItemAtPoint(pt);
-        bool npwr = IsOverPowerButton(pt);
-        if (np   != m_hoveredPinnedIndex      ||
-            nr   != m_hoveredRecommendedIndex  ||
-            nrc  != m_hoveredRightIndex        ||
-            npwr != m_hoveredPower) {
-            m_hoveredPinnedIndex      = np;
-            m_hoveredRecommendedIndex = nr;
-            m_hoveredRightIndex       = nrc;
-            m_hoveredPower            = npwr;
+
+        int  nProg = (m_viewMode == LeftViewMode::Programs)
+                     ? GetProgItemAtPoint(pt) : -1;
+        bool nApRow = IsOverApRow(pt);
+        int  nAp   = (m_viewMode == LeftViewMode::AllPrograms)
+                     ? GetApItemAtPoint(pt) : -1;
+        int  nrc   = GetRightItemAtPoint(pt);
+        bool npwr  = IsOverPowerButton(pt);
+
+        if (nProg != m_hoveredProgIndex  ||
+            nApRow != m_hoveredApRow     ||
+            nAp   != m_hoveredApIndex   ||
+            nrc   != m_hoveredRightIndex ||
+            npwr  != m_hoveredPower) {
+            m_hoveredProgIndex  = nProg;
+            m_hoveredApRow      = nApRow;
+            m_hoveredApIndex    = nAp;
+            m_hoveredRightIndex = nrc;
+            m_hoveredPower      = npwr;
             InvalidateRect(m_hwnd, NULL, FALSE);
         }
         return 0;
     }
 
     case WM_MOUSELEAVE:
-        m_trackingMouse           = false;
-        m_hoveredPinnedIndex      = -1;
-        m_hoveredRecommendedIndex = -1;
-        m_hoveredRightIndex       = -1;
-        m_hoveredPower            = false;
+        m_trackingMouse     = false;
+        m_hoveredProgIndex  = -1;
+        m_hoveredApRow      = false;
+        m_hoveredApIndex    = -1;
+        m_hoveredRightIndex = -1;
+        m_hoveredPower      = false;
         InvalidateRect(m_hwnd, NULL, FALSE);
         return 0;
 
@@ -1019,41 +1126,51 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         int rc = GetRightItemAtPoint(pt);
         if (rc >= 0) { ExecuteRightItem(rc); return 0; }
 
-        // Left column — pinned apps
-        int p = GetPinnedItemAtPoint(pt);
-        if (p >= 0) { ExecutePinnedItem(p); return 0; }
+        // "All Programs" / "Back" row
+        if (IsOverApRow(pt)) {
+            if (m_viewMode == LeftViewMode::Programs) {
+                m_viewMode       = LeftViewMode::AllPrograms;
+                m_hoveredApIndex = -1;
+                m_apNavStack.clear();
+                CF_LOG(Info, "Switching to All Programs view");
+            } else {
+                NavigateBack();
+            }
+            InvalidateRect(m_hwnd, NULL, FALSE);
+            return 0;
+        }
 
-        // Left column — recommended items
-        int r = GetRecommendedItemAtPoint(pt);
-        if (r >= 0) { ExecuteRecommendedItem(r); return 0; }
+        // Left column — Programs view: pinned app launch
+        if (m_viewMode == LeftViewMode::Programs) {
+            int p = GetProgItemAtPoint(pt);
+            if (p >= 0) { ExecutePinnedItem(p); return 0; }
+        }
+
+        // Left column — All Programs view: folder/item activation
+        if (m_viewMode == LeftViewMode::AllPrograms) {
+            int ap = GetApItemAtPoint(pt);
+            if (ap >= 0) { LaunchApItem(ap); return 0; }
+        }
 
         // Bottom bar — power button
-        if (IsOverPowerButton(pt)) { ShowPowerMenu(); }
-
-        // TODO Phase S2: detect click on "All Programs" label and switch left column
-        // to the All Programs tree view using m_programTree.
-
+        if (IsOverPowerButton(pt)) { ShowPowerMenu(); return 0; }
 
         // Search box — open Windows Search
         {
-            int bx1 = MARGIN, by1 = SEARCH_Y;
-            int bx2 = DIVIDER_X - MARGIN, by2 = SEARCH_Y + SEARCH_H;
-            RECT sr = { bx1, by1, bx2, by2 };
+            RECT sr = { MARGIN, SEARCH_Y, DIVIDER_X - MARGIN, SEARCH_Y + SEARCH_H };
             if (PtInRect(&sr, pt))
                 ShellExecuteW(NULL, L"open", L"ms-search:", NULL, NULL, SW_SHOW);
         }
         return 0;
     }
 
-    case WM_RBUTTONDOWN: {
-        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-        int r = GetRecommendedItemAtPoint(pt);
-        if (r >= 0) ShowEditDialog(r);
-        return 0;
-    }
-
     case WM_KEYDOWN:
-        if (wParam == VK_ESCAPE) Hide();
+        if (wParam == VK_ESCAPE) {
+            if (m_viewMode == LeftViewMode::AllPrograms)
+                NavigateBack();   // ESC goes back one level / to Programs
+            else
+                Hide();
+        }
         return 0;
 
     default:

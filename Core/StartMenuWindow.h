@@ -17,7 +17,8 @@ struct SubMenuItem {
 };
 
 /// <summary>
-/// Recommended section item configuration
+/// Recommended section item configuration (kept for Dashboard API compatibility;
+/// not rendered in Win7 mode — Win7 left column has no "Recommended" section).
 /// </summary>
 struct MenuItem {
     const wchar_t* name;
@@ -28,10 +29,10 @@ struct MenuItem {
 };
 
 /// <summary>
-/// Pinned app shown in the left-column grid
+/// Pinned app shown in the left-column vertical list (Win7 style).
 /// </summary>
 struct PinnedItem {
-    const wchar_t* name;       // Full app name (shown below icon square)
+    const wchar_t* name;       // Full app name (shown to the right of the icon)
     const wchar_t* shortName;  // Short label drawn inside icon square
     const wchar_t* command;    // Shell command / URI to execute
     COLORREF iconColor;        // Icon square background color
@@ -52,11 +53,19 @@ struct Win7RightItem {
     const wchar_t*  params;         // ShellExecute lpParameters (may be nullptr)
 };
 
+/// Left-column view mode:
+///   Programs     — vertical list of pinned apps + "All Programs" entry
+///   AllPrograms  — "All Programs" tree from AllProgramsEnumerator
+enum class LeftViewMode { Programs, AllPrograms };
+
 /// <summary>
 /// Custom Start Menu window — Windows 7-style two-column layout.
-/// Left column : Search box | Pinned grid (2×3) | Recommended list
-/// Right column: Win7 shell links (Documents, Pictures, Music, …, Control Panel, …)
-/// Bottom bar  : User avatar + name | Power button
+///
+/// Left column  : [Pinned programs — vertical list]
+///                [All Programs / Back row]
+///                [Search box]
+/// Right column : Win7 shell links (Documents, Pictures, Music, …, Control Panel, …)
+/// Bottom bar   : User avatar + name | Power button
 /// </summary>
 class StartMenuWindow {
 public:
@@ -81,7 +90,7 @@ public:
     /// Set text color (COLORREF)
     void SetTextColor(COLORREF color);
 
-    /// Set which recommended items are visible
+    /// Set which recommended items are visible (API kept for Dashboard compat)
     void SetMenuItems(bool controlPanel, bool deviceManager, bool installedApps,
                       bool documents, bool pictures, bool videos, bool recentFiles);
 
@@ -102,7 +111,7 @@ private:
     COLORREF m_bgColor   = RGB(32, 32, 36);
     COLORREF m_textColor = RGB(255, 255, 255);
 
-    // Recommended section items (visibility controlled by Dashboard)
+    // Recommended section items (visibility controlled by Dashboard; not painted in Win7 mode)
     MenuItem m_menuItems[7] = {
         {L"Control Panel",  L"", true,  nullptr, 0},
         {L"Device Manager", L"", true,  nullptr, 0},
@@ -117,25 +126,33 @@ private:
     std::wstring m_customMenuNames[7];
     std::wstring m_customTitle;
 
+    // ── Left-column view mode ───────────────────────────────────────────────
+    LeftViewMode m_viewMode = LeftViewMode::Programs;
+
+    // Navigation stack for All Programs drill-down.
+    // Each entry points to the children vector of the folder we entered.
+    // Empty stack = root of m_programTree.
+    std::vector<const std::vector<MenuNode>*> m_apNavStack;
+
     // Hover state
-    int  m_hoveredPinnedIndex      = -1;
-    int  m_hoveredRecommendedIndex = -1;
-    int  m_hoveredRightIndex       = -1;   // Win7 right column hover
-    bool m_hoveredPower            = false;
-    bool m_trackingMouse           = false;
+    int  m_hoveredProgIndex    = -1;   // Programs list (pinned items)
+    bool m_hoveredApRow        = false; // "All Programs" / "Back" row
+    int  m_hoveredApIndex      = -1;   // All Programs tree item
+    int  m_hoveredRightIndex   = -1;   // Win7 right column hover
+    bool m_hoveredPower        = false;
+    bool m_trackingMouse       = false;
 
     // Cached Windows login name for the right-column header
     wchar_t m_username[64] = {};
 
-    // Phase S2: All Programs tree pre-cached at Initialize(); not yet rendered.
-    // Phase S2 UI will iterate this to build the "All Programs" left-column view.
+    // Phase S2: All Programs tree pre-cached at Initialize().
     std::vector<MenuNode> m_programTree;
 
 
-    // ── Layout constants ────────────────────────────────────────────────────
+    // ── Layout constants (Windows 7 style) ──────────────────────────────────
     static constexpr int WIDTH  = 580;
     static constexpr int HEIGHT = 700;
-    static constexpr int MARGIN = 20;
+    static constexpr int MARGIN = 12;
 
     // ── Win7 two-column divider ─────────────────────────────────────────────
     // Left column  : x ∈ [0, DIVIDER_X)
@@ -152,38 +169,34 @@ private:
     // Total entries in s_rightItems (includes separators)
     static constexpr int RIGHT_ITEM_COUNT = 10;
 
-    // Search box (left column)
-    static constexpr int SEARCH_Y        = 16;
-    static constexpr int SEARCH_H        = 46;
+    // ── Bottom bar (power button + user name) ───────────────────────────────
+    static constexpr int BOTTOM_BAR_H    = 40;
+    static constexpr int BOTTOM_BAR_Y    = HEIGHT - BOTTOM_BAR_H;   // 660
+    static constexpr int POWER_BTN_R     = 14;   // radius of power button circle
 
-    // "Pinned" header row (left column)
-    static constexpr int PINNED_HEADER_Y = 80;
+    // ── Search box — bottom of left column, just above bottom bar ───────────
+    static constexpr int SEARCH_H        = 34;
+    static constexpr int SEARCH_Y        = BOTTOM_BAR_Y - SEARCH_H - 2;  // 624
 
-    // Pinned apps grid (left column, 2 columns × 3 rows = 6 items)
-    static constexpr int PINNED_GRID_Y   = 114;
-    static constexpr int PINNED_COLS     = 2;
-    static constexpr int PINNED_ROWS     = 3;
-    static constexpr int PINNED_COUNT    = PINNED_COLS * PINNED_ROWS;          // 6
-    static constexpr int PINNED_CELL_W   = (DIVIDER_X - 2 * MARGIN) / PINNED_COLS; // 145
-    static constexpr int PINNED_CELL_H   = 88;
-    static constexpr int PINNED_ICON_SZ  = 44;
-    static constexpr int PINNED_GRID_END = PINNED_GRID_Y + PINNED_ROWS * PINNED_CELL_H; // 378
+    // ── "All Programs" / "Back" row — just above search box ─────────────────
+    static constexpr int AP_ROW_H        = 28;
+    static constexpr int AP_ROW_Y        = SEARCH_Y - AP_ROW_H - 2;      // 594
 
-    // "Recommended" header row (left column)
-    static constexpr int REC_HEADER_Y    = PINNED_GRID_END + 12;   // 390
-    static constexpr int REC_START_Y     = REC_HEADER_Y + 34;      // 424
-    static constexpr int REC_ITEM_H      = 42;
+    // ── Programs list — vertical pinned-app rows, fills top of left column ──
+    static constexpr int PROG_Y          = 8;
+    static constexpr int PROG_ITEM_H     = 36;
+    static constexpr int PROG_ICON_SZ    = 24;
+    static constexpr int PROG_COUNT      = 6;   // must match s_pinnedItems length
 
-    // Bottom bar (full width)
-    static constexpr int BOTTOM_BAR_Y    = HEIGHT - 60;            // 640
-    static constexpr int POWER_BTN_R     = 16;   // radius of power button circle
+    // Max items visible in All Programs list (without scroll)
+    static constexpr int AP_MAX_VISIBLE  = (AP_ROW_Y - PROG_Y) / PROG_ITEM_H; // ~16
 
     // ── Window class names ──────────────────────────────────────────────────
     static constexpr wchar_t WINDOW_CLASS[]      = L"CrystalFrame_StartMenu";
     static constexpr wchar_t EDIT_DIALOG_CLASS[] = L"CrystalFrame_EditDialog";
 
     // ── Static data ─────────────────────────────────────────────────────────
-    static const PinnedItem    s_pinnedItems[PINNED_COUNT];
+    static const PinnedItem    s_pinnedItems[PROG_COUNT];
     static const Win7RightItem s_rightItems[RIGHT_ITEM_COUNT];
 
     // ── Win32 plumbing ──────────────────────────────────────────────────────
@@ -195,11 +208,24 @@ private:
 
     // ── Painting ────────────────────────────────────────────────────────────
     void Paint();
-    void PaintSearchBox(HDC hdc, const RECT& cr);
-    void PaintPinnedSection(HDC hdc, const RECT& cr);
-    void PaintRecommendedSection(HDC hdc, const RECT& cr);
+
+    // Left column — Programs view
+    void PaintProgramsList(HDC hdc, const RECT& cr);
+
+    // Left column — All Programs view (tree from AllProgramsEnumerator)
+    void PaintAllProgramsView(HDC hdc, const RECT& cr);
+
+    // Left column — "All Programs" / "Back" row (shared by both views)
+    void PaintApRow(HDC hdc, const RECT& cr);
+
+    // Left column — search box (Win7: at the bottom of the left column)
+    void PaintWin7SearchBox(HDC hdc, const RECT& cr);
+
+    // Right column
+    void PaintWin7RightColumn(HDC hdc, const RECT& cr);
+
+    // Bottom bar
     void PaintBottomBar(HDC hdc, const RECT& cr);
-    void PaintWin7RightColumn(HDC hdc, const RECT& cr);   // Win7 right column
 
     // Draw a colored rounded icon square with a short label inside
     void DrawIconSquare(HDC hdc, int cx, int cy, int sz,
@@ -210,15 +236,22 @@ private:
     void DrawSeparator(HDC hdc, int y, int x1, int x2);
 
     // ── Hit testing ─────────────────────────────────────────────────────────
-    int  GetPinnedItemAtPoint(POINT pt);        // -1 if none
-    int  GetRecommendedItemAtPoint(POINT pt);   // -1 if none
+    int  GetProgItemAtPoint(POINT pt);      // pinned list; -1 if none
+    bool IsOverApRow(POINT pt);             // "All Programs" / "Back" row
+    int  GetApItemAtPoint(POINT pt);        // All Programs list item; -1 if none
     bool IsOverPowerButton(POINT pt);
-    int  GetRightItemAtPoint(POINT pt);         // -1 if none / separator
+    int  GetRightItemAtPoint(POINT pt);     // -1 if none / separator
 
     // ── Execution ───────────────────────────────────────────────────────────
     void ExecutePinnedItem(int index);
-    void ExecuteRecommendedItem(int index);
-    void ExecuteRightItem(int index);           // Win7 right column launch
+    void ExecuteRecommendedItem(int index); // kept for backward compat
+    void ExecuteRightItem(int index);       // Win7 right column launch
+    void LaunchApItem(int index);           // launch item from current AP node list
+
+    // ── All Programs navigation ──────────────────────────────────────────────
+    const std::vector<MenuNode>& CurrentApNodes() const;
+    void NavigateIntoFolder(const std::vector<MenuNode>& children);
+    void NavigateBack();
 
     // ── Color helpers ────────────────────────────────────────────────────────
     COLORREF CalculateHoverColor();

@@ -1,6 +1,6 @@
 
 # WORKLOG — Win7-Revival / CrystalFrame
-Last updated: 2026-02-21 (session 2)
+Last updated: 2026-02-21 (session 3)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -27,6 +27,12 @@ Current Start Menu implementation:
   folder links and system applets. No dead UI remains in the right column.
 - Left column: 2 × 3 pinned grid (6 items, config-driven), search box, recommended section,
   bottom bar with power menu — unchanged from Win11-style baseline; to be aligned in later phases.
+
+- **Codex P2 fix (2026-02-21):** `StartMenuWindow` constructor — `GetEnvironmentVariableW`
+  buffer-length validation corrected. Previously any nonzero return was treated as success;
+  when username ≥ 64 chars the buffer was unterminated and `DrawTextW(...,-1,...)` could
+  overread. Now only `0 < ret < len` is accepted as success; buffer is zeroed before the
+  `GetUserNameW` fallback, which also validates its result before use.
 
 - **Phase S2 foundation DONE (2026-02-21):** New module `Core/AllProgramsEnumerator.h/.cpp`
   introduced (pure data layer, no UI). Implements:

@@ -153,6 +153,16 @@ private:
     // Scroll offset for AllPrograms list (first visible node index); keyboard-driven.
     int  m_apScrollOffset      = 0;
 
+    // Hover-to-open submenu state (S3.3)
+    UINT_PTR m_hoverTimer        = 0;   // SetTimer handle; 0 = no pending timer
+    int      m_hoverCandidate    = -1;  // absolute AP node idx waiting for delay
+    bool     m_subMenuOpen       = false;
+    int      m_subMenuNodeIdx    = -1;  // absolute AP node that opened the submenu
+    int      m_subMenuHoveredIdx = -1;  // visual index in submenu list (-1 = none)
+
+    static constexpr UINT_PTR HOVER_TIMER_ID  = 1;
+    static constexpr UINT     HOVER_DELAY_MS  = 400;
+
     // Cached Windows login name for the right-column header
     wchar_t m_username[64] = {};
 
@@ -201,6 +211,12 @@ private:
 
     // Max items visible in All Programs list (without scroll)
     static constexpr int AP_MAX_VISIBLE  = (AP_ROW_Y - PROG_Y) / PROG_ITEM_H; // ~16
+
+    // ── Hover submenu panel layout (S3.3) ───────────────────────────────────
+    static constexpr int SM_X       = DIVIDER_X + 4;
+    static constexpr int SM_TITLE_H = 32;
+    static constexpr int SM_ITEM_H  = 36;
+    static constexpr int SM_MAX_VIS = (BOTTOM_BAR_Y - SM_TITLE_H) / SM_ITEM_H;
 
     // ── Window class names ──────────────────────────────────────────────────
     static constexpr wchar_t WINDOW_CLASS[]      = L"CrystalFrame_StartMenu";
@@ -263,6 +279,14 @@ private:
     const std::vector<MenuNode>& CurrentApNodes() const;
     void NavigateIntoFolder(const std::vector<MenuNode>& children);
     void NavigateBack();
+
+    // ── Hover-to-open lateral submenu (S3.3) ─────────────────────────────────
+    void OpenSubMenu(int apNodeIdx);       // show submenu for folder at apNodeIdx
+    void CloseSubMenu();                   // hide submenu + reset state
+    bool IsOverSubMenu(POINT pt) const;    // true if pt is in the submenu panel
+    int  GetSubMenuItemAtPoint(POINT pt);  // visual index in submenu; -1 if none
+    void PaintSubMenu(HDC hdc, const RECT& cr);
+    void ExecuteSubMenuItem(int visualIdx);
 
     // ── Color helpers ────────────────────────────────────────────────────────
     COLORREF CalculateHoverColor();

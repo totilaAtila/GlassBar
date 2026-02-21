@@ -234,13 +234,28 @@ DoD:
 - `NavigateIntoFolder` / `NavigateBack` / `Hide`: reset keyboard selection state.
 - ESC unchanged.
 
-#### S3.2 — All Programs mouse-wheel scroll — IN PROGRESS (branch `claude/s3-ap-scroll-T0m6X`)
+#### S3.2 — All Programs mouse-wheel scroll — DONE (PR #41, branch `claude/s3-ap-scroll-T0m6X`)
 - `m_apScrollOffset`: absolute first-visible-node index; clamped on every paint.
 - `PaintAllProgramsView`: renders `nodes[offset..offset+count-1]`; hover/key selection compared as absolute nodeIdx; blue accent line at top of list when offset > 0; "▼ more…" hint when items remain below.
 - `GetApItemAtPoint`: returns `m_apScrollOffset + visual_idx` (absolute); hover and click use consistent absolute index.
 - `WM_MOUSEWHEEL`: 3 items per wheel notch; clamp `[0, total − AP_MAX_VISIBLE]`; invalidate.
 - WM_KEYDOWN AllPrograms nav updated to use absolute range `[offset, offset+visibleCount−1]`.
 - `NavigateIntoFolder` / `NavigateBack` / `Hide`: reset `m_apScrollOffset = 0`.
+
+#### S3.3 — Hover-to-open submenu lateral (folders in AllPrograms) — IN PROGRESS (branch `claude/s3-hover-submenu-T0m6X`)
+- `HOVER_TIMER_ID` / `HOVER_DELAY_MS` (400 ms): `SetTimer` on folder hover; killed on unhover/navigation/hide.
+- `m_hoverCandidate`: absolute AP node index pending the 400 ms timer.
+- `m_subMenuOpen` / `m_subMenuNodeIdx` / `m_subMenuHoveredIdx`: state for the lateral submenu panel drawn over the right-column area.
+- `OpenSubMenu(idx)` / `CloseSubMenu()`: show/hide submenu; reset hover candidate.
+- `PaintSubMenu(hdc)`: draws folder title + children list in right-column area (same HWND, no z-order issues, no cursor freeze risk).
+- `GetSubMenuItemAtPoint(pt)` / `IsOverSubMenu(pt)`: hit testing for submenu panel.
+- `ExecuteSubMenuItem(idx)`: folder → `NavigateIntoFolder` (close submenu first); shortcut → `LaunchApItem`.
+- WM_MOUSEMOVE: if hovering same folder as open submenu → keep open; different folder → close + restart timer; non-folder → close + cancel timer.
+- WM_TIMER HOVER_TIMER_ID: `OpenSubMenu(m_hoverCandidate)`.
+- WM_MOUSELEAVE: kill timer + `CloseSubMenu`.
+- WM_KEYDOWN ESC: if submenu open → `CloseSubMenu`; else existing behavior.
+- `GetRightItemAtPoint`: returns -1 while submenu is open (right column blocked).
+- No global hooks, no separate HWND → no cursor freeze, no input blocking.
 
 ---
 

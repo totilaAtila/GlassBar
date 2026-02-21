@@ -76,7 +76,7 @@ New requirement (non-negotiable, §10):
 Start Menu must match Windows 7 look & layout:
 - Two-column layout (left programs list + right system links).
 - Correct header/user area (user picture/name) in the right location.
-- Correct search box position and styling.
+- No Search Bar needed
 - Correct “All Programs” entry and navigation experience.
 - Correct bottom bar with Shut down button + arrow (power options).
 - Correct typography, spacing, hover highlights, separators, and corner/edge styling.

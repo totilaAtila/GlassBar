@@ -3,6 +3,7 @@
 #include <string>
 #include <fstream>
 #include <mutex>
+#include <atomic>
 #include <chrono>
 #include <sstream>
 #include <iomanip>
@@ -24,8 +25,8 @@ public:
     void Shutdown();
 
     void Log(LogLevel level, const std::string& message, const char* file, int line);
-    void SetMinLevel(LogLevel level) { m_minLevel = level; }
-    LogLevel GetMinLevel() const { return m_minLevel; }
+    void SetMinLevel(LogLevel level) { m_minLevel.store(level, std::memory_order_relaxed); }
+    LogLevel GetMinLevel() const { return m_minLevel.load(std::memory_order_relaxed); }
 
     // Prevent copying
     Logger(const Logger&) = delete;
@@ -38,7 +39,7 @@ private:
     std::wofstream m_logFile;
     std::mutex m_mutex;
     bool m_initialized = false;
-    LogLevel m_minLevel = LogLevel::Info;  // Debug suppressed by default
+    std::atomic<LogLevel> m_minLevel { LogLevel::Info };  // Debug suppressed by default
     
     std::wstring GetTimestamp();
     std::wstring LevelToString(LogLevel level);

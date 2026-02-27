@@ -41,8 +41,10 @@ namespace CrystalFrame.Dashboard
         public bool StartShowPlaceholder5 { get; set; } = false;
         public bool TaskbarBlur { get; set; } = false;
         public bool StartBlur { get; set; } = false;
-        // True until the first successful launch completes — triggers safe-mode defaults
-        public bool IsFirstRun { get; set; } = true;
+        // True until the first successful launch completes — triggers safe-mode defaults.
+        // Default is false so that existing config files (upgrade scenario) are not treated
+        // as first-run when the field is absent from JSON.
+        public bool IsFirstRun { get; set; } = false;
     }
 
     public class ConfigManager
@@ -174,10 +176,13 @@ namespace CrystalFrame.Dashboard
                 {
                     var json = await File.ReadAllTextAsync(_configPath);
                     _config = JsonSerializer.Deserialize<Config>(json) ?? new Config();
+                    // Existing file: IsFirstRun defaults to false in Config class,
+                    // so absent field in JSON = upgrade scenario = normal run. Correct.
                 }
                 else
                 {
-                    _config = new Config();
+                    // No file at all = genuine first install.
+                    _config = new Config { IsFirstRun = true };
                 }
             }
             catch (Exception ex)

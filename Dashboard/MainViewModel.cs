@@ -227,6 +227,19 @@ namespace CrystalFrame.Dashboard
                 await _config.LoadAsync();
                 Debug.WriteLine("Config loaded successfully");
 
+                // First-run safety: on the very first launch (or after a crash before the flag
+                // was cleared) disable all effects so the app starts in a known-good state.
+                // The user can enable features from the Dashboard after confirming startup works.
+                bool isFirstRun = _config.IsFirstRun;
+                if (isFirstRun)
+                {
+                    Debug.WriteLine("[FIRST RUN] First launch detected — all effects disabled for safe startup");
+                    _config.TaskbarEnabled = false;
+                    _config.StartEnabled   = false;
+                    _config.IsFirstRun     = false; // clear the flag
+                    _ = _config.SaveAsync();        // persist so the next run is normal
+                }
+
                 // Apply loaded config to properties
                 TaskbarOpacity = _config.TaskbarOpacity;
                 StartOpacity = _config.StartOpacity;
@@ -288,9 +301,12 @@ namespace CrystalFrame.Dashboard
                 _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
                                         StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
 
-                // TESTING: Enable Start Menu hook to intercept Windows key and Start button
-                _core.SetStartMenuHookEnabled(true);
-                Debug.WriteLine("[TEST] Start Menu hook ENABLED");
+                // Start Menu hook: skip on first run (effects are off, hook not needed)
+                if (!isFirstRun)
+                {
+                    _core.SetStartMenuHookEnabled(true);
+                    Debug.WriteLine("Start Menu hook ENABLED");
+                }
 
                 Debug.WriteLine("ViewModel initialized successfully");
                 return true;
@@ -342,9 +358,8 @@ namespace CrystalFrame.Dashboard
                     _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
                                             StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
 
-                    // TESTING: Re-enable Start Menu hook
                     _core.SetStartMenuHookEnabled(true);
-                    Debug.WriteLine("[TEST] Start Menu hook re-enabled after restart");
+                    Debug.WriteLine("Start Menu hook re-enabled after Core restart");
 
                     ConnectionStatus = "✓ Core engine running";
                 }

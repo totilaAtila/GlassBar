@@ -52,8 +52,12 @@ Logger::~Logger() {
 }
 
 void Logger::Log(LogLevel level, const std::string& message, const char* file, int line) {
+    if (level < m_minLevel) {
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+
     if (!m_initialized) {
         return;
     }

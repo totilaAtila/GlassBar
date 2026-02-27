@@ -2,8 +2,86 @@
 #include "Core.h"
 #include "Diagnostics.h"
 #include <shlobj.h>
+#include <DbgHelp.h>
+#pragma comment(lib, "DbgHelp.lib")
 
 using namespace CrystalFrame;
+
+// ---------------------------------------------------------------------------
+// Unhandled-exception crash handler
+// Captures any SEH fault (access violation, stack overflow, heap corruption,
+// etc.) that escapes all try/catch blocks, writes a minidump and a plain-text
+// crash entry so post-mortem analysis is always possible.
+// ---------------------------------------------------------------------------
+static LONG WINAPI CrystalFrameExceptionFilter(EXCEPTION_POINTERS* pei)
+{
+    // Resolve the CrystalFrame data directory (same folder used by the logger).
+    wchar_t appDataBuf[MAX_PATH] = {};
+    std::wstring crashDir;
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appDataBuf))) {
+        crashDir = std::wstring(appDataBuf) + L"\\CrystalFrame";
+    } else {
+        crashDir = L".";
+    }
+    CreateDirectoryW(crashDir.c_str(), nullptr);
+
+    // Build a timestamp string used for both file names.
+    SYSTEMTIME st = {};
+    GetLocalTime(&st);
+    wchar_t ts[32] = {};
+    swprintf_s(ts, L"%04u%02u%02u_%02u%02u%02u",
+               st.wYear, st.wMonth, st.wDay,
+               st.wHour, st.wMinute, st.wSecond);
+
+    // --- Minidump --------------------------------------------------------
+    std::wstring dmpPath = crashDir + L"\\crash_" + ts + L".dmp";
+    HANDLE hDmp = CreateFileW(dmpPath.c_str(), GENERIC_WRITE, 0,
+                              nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hDmp != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION mdei = {};
+        mdei.ThreadId          = GetCurrentThreadId();
+        mdei.ExceptionPointers = pei;
+        mdei.ClientPointers    = FALSE;
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(),
+                          hDmp, MiniDumpWithThreadInfo, &mdei, nullptr, nullptr);
+        CloseHandle(hDmp);
+    }
+
+    // --- Crash log entry -------------------------------------------------
+    // Written with raw Win32 so it works even if Logger never initialised.
+    std::wstring logPath = crashDir + L"\\CrystalFrame.log";
+    HANDLE hLog = CreateFileW(logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                              nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hLog != INVALID_HANDLE_VALUE) {
+        DWORD code = pei->ExceptionRecord->ExceptionCode;
+        void* addr = pei->ExceptionRecord->ExceptionAddress;
+
+        wchar_t entry[768] = {};
+        swprintf_s(entry,
+            L"\n[%04u-%02u-%02u %02u:%02u:%02u][-----][ERROR] "
+            L"UNHANDLED EXCEPTION — Code=0x%08X  Addr=%p\n"
+            L"[%04u-%02u-%02u %02u:%02u:%02u][-----][ERROR] "
+            L"Minidump written to: %s\n",
+            st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+            code, addr,
+            st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+            dmpPath.c_str());
+
+        DWORD written = 0;
+        // The Logger writes through wofstream (system locale, no BOM on append).
+        // Match that by converting to the ANSI code page here.
+        int needed = WideCharToMultiByte(CP_ACP, 0, entry, -1, nullptr, 0, nullptr, nullptr);
+        if (needed > 0) {
+            std::string narrow(static_cast<size_t>(needed), '\0');
+            WideCharToMultiByte(CP_ACP, 0, entry, -1, narrow.data(), needed, nullptr, nullptr);
+            WriteFile(hLog, narrow.c_str(), static_cast<DWORD>(narrow.size() - 1), &written, nullptr);
+        }
+        CloseHandle(hLog);
+    }
+
+    // Pass control back to Windows so WER can also record the crash.
+    return EXCEPTION_CONTINUE_SEARCH;
+}
 
 // Get log file path in AppData\Local\CrystalFrame
 std::wstring GetLogFilePath() {
@@ -33,6 +111,10 @@ int WINAPI wWinMain(
     UNREFERENCED_PARAMETER(lpCmdLine);
     UNREFERENCED_PARAMETER(nShowCmd);
     
+    // Install crash handler as early as possible — before Logger, COM, or any
+    // subsystem that could itself fault on a bad machine state.
+    SetUnhandledExceptionFilter(CrystalFrameExceptionFilter);
+
     // Set DPI awareness for accurate positioning
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     

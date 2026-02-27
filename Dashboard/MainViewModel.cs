@@ -310,8 +310,8 @@ namespace CrystalFrame.Dashboard
                 _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
                                         StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
 
-                // Start Menu hook: skip on first run (effects are off, hook not needed)
-                if (!isFirstRun)
+                // Start Menu hook: skip on first run, and only when Start is actually enabled.
+                if (!isFirstRun && StartEnabled)
                 {
                     _core.SetStartMenuHookEnabled(true);
                     Debug.WriteLine("Start Menu hook ENABLED");
@@ -367,8 +367,8 @@ namespace CrystalFrame.Dashboard
                     _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
                                             StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
 
-                    _core.SetStartMenuHookEnabled(true);
-                    Debug.WriteLine("Start Menu hook re-enabled after Core restart");
+                    _core.SetStartMenuHookEnabled(StartEnabled);
+                    Debug.WriteLine($"Start Menu hook {(StartEnabled ? "ENABLED" : "DISABLED")} after Core restart");
 
                     ConnectionStatus = "✓ Core engine running";
                 }

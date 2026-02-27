@@ -3,6 +3,7 @@
 #include <string>
 #include <fstream>
 #include <mutex>
+#include <atomic>
 #include <chrono>
 #include <sstream>
 #include <iomanip>
@@ -19,23 +20,26 @@ enum class LogLevel {
 class Logger {
 public:
     static Logger& Instance();
-    
+
     void Initialize(const std::wstring& logFilePath);
     void Shutdown();
-    
+
     void Log(LogLevel level, const std::string& message, const char* file, int line);
-    
+    void SetMinLevel(LogLevel level) { m_minLevel.store(level, std::memory_order_relaxed); }
+    LogLevel GetMinLevel() const { return m_minLevel.load(std::memory_order_relaxed); }
+
     // Prevent copying
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
-    
+
 private:
     Logger() = default;
     ~Logger();
-    
+
     std::wofstream m_logFile;
     std::mutex m_mutex;
     bool m_initialized = false;
+    std::atomic<LogLevel> m_minLevel { LogLevel::Info };  // Debug suppressed by default
     
     std::wstring GetTimestamp();
     std::wstring LevelToString(LogLevel level);

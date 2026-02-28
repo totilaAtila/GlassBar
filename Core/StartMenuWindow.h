@@ -170,11 +170,6 @@ private:
     // Phase S2: All Programs tree pre-cached at Initialize().
     std::vector<MenuNode> m_programTree;
 
-    // S6 — real system icons loaded once in Initialize(), freed in Shutdown().
-    // NULL entries mean "no icon available → fall back to DrawIconSquare".
-    HICON m_pinnedIcons[PROG_COUNT]          = {};  // 32×32 for pinned app list
-    HICON m_rightIcons[RIGHT_ITEM_COUNT]     = {};  // 16×16 for right-column items
-
 
     // ── Layout constants (Windows 7 style) ──────────────────────────────────
     static constexpr int WIDTH  = 400;   // 450 - 50 (left panel narrowed ~7 chars)
@@ -237,6 +232,12 @@ private:
     // ── Static data ─────────────────────────────────────────────────────────
     static const PinnedItem    s_pinnedItems[PROG_COUNT];
     static const Win7RightItem s_rightItems[RIGHT_ITEM_COUNT];
+
+    // S6 — real system icons loaded once in Initialize(), freed in Shutdown().
+    // Declared after PROG_COUNT / RIGHT_ITEM_COUNT so MSVC can resolve the sizes.
+    // NULL entries mean "no icon available → fall back to DrawIconSquare".
+    HICON m_pinnedIcons[PROG_COUNT]      = {};  // 32×32 for pinned app list
+    HICON m_rightIcons[RIGHT_ITEM_COUNT] = {};  // 16×16 for right-column items
 
     // ── Win32 plumbing ──────────────────────────────────────────────────────
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);

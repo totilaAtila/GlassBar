@@ -287,9 +287,16 @@ namespace CrystalFrame.Dashboard
             // we must still call CoreShutdown to clean up the native engine.
             if (_running)
             {
-                _running = false;
-                CoreNative.CoreShutdown();
-                CoreRunningChanged?.Invoke(this, false);
+                try
+                {
+                    _running = false;
+                    CoreNative.CoreShutdown();
+                    CoreRunningChanged?.Invoke(this, false);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[CoreManager] Cleanup after unexpected exit failed: {ex.Message}");
+                }
             }
 
             Debug.WriteLine("[CoreManager] Message pump thread exited");

@@ -495,8 +495,11 @@ namespace CrystalFrame.Dashboard
 
         private void OnCoreRunningChanged(object sender, bool running)
         {
-            CoreRunning = running;
-            ConnectionStatus = running ? "✓ Core engine running" : "Core engine stopped";
+            _dispatcherQueue?.TryEnqueue(() =>
+            {
+                CoreRunning = running;
+                ConnectionStatus = running ? "✓ Core engine running" : "Core engine stopped";
+            });
         }
 
         /// <summary>

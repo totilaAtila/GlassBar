@@ -1,6 +1,6 @@
 
 # WORKLOG — Win7-Revival / CrystalFrame
-Last updated: 2026-02-27 (session 8)
+Last updated: 2026-02-28 (session 9)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -68,6 +68,50 @@ Remaining for Phase S1 DoD:
 New requirement (non-negotiable, §10):
 - **Start Menu must be visually AND functionally identical to Windows 7**
 - **All menus and submenus must be 100% functional** (no placeholders, no fake UI)
+
+### Session 9 note (2026-02-28) — Crash diagnostic + stabilitate DLL + root cause găsit
+
+**Context:** Silent crash persistent — aplicația dispărea fără log, fără fereastră, fără nimic în `%LOCALAPPDATA%\CrystalFrame\`.
+
+**Investigare și fix-uri aplicate (PRs #52, #53, #54 — merged to main):**
+
+- **PR #52** — `Dashboard/MainViewModel.cs` + `Dashboard/CoreManager.cs`:
+  - `OnCoreRunningChanged` seta proprietăți XAML-bound direct din `MessagePumpThread` (background thread) → `COMException 0x8001010E` (cross-thread UI access) → excepție necatchuită → crash `0xE0434352` (managed CLR unhandled).
+  - Fix: `OnCoreRunningChanged` wrapped în `_dispatcherQueue.TryEnqueue()`.
+  - `CoreRunningChanged?.Invoke(this, false)` era în afara try/catch din `MessagePumpThread` — mutat în bloc try/catch.
+  - Guard `StartEnabled` adăugat la activarea hook-ului Start Menu (`if (!isFirstRun && StartEnabled)`).
+
+- **PR #53** — `Core/CMakeLists.txt`:
+  - `VCRUNTIME140.dll` lipsea din publish folder (publish self-contained nu includea CRT nativ).
+  - Fix: `MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"` — static CRT embedding.
+  - **Important:** fix-ul e activ abia după rebuild C++ cu CMake.
+
+- **PR #54** — `Dashboard/App.xaml.cs` (handler de bază `Application.UnhandledException`):
+  - Adăugat handler care prinde excepțiile managed scăpate din toate try/catch-urile.
+
+**Branch curent nemerged (`claude/reset-working-commit-o1Ia3`):**
+- `Core/CoreApi.cpp`: `CrystalFrameExceptionFilter` (SEH handler nativ) mutat din `main.cpp` (cod mort, exclus din CMakeLists) în `CoreApi.cpp` și instalat ca primul pas în `CoreInitialize()`. Produce minidump + log entry în `%LOCALAPPDATA%\CrystalFrame\` la orice crash nativ.
+- `Dashboard/App.xaml.cs`: handler îmbunătățit — scrie excepția în `CrystalFrame.log` și lasă `e.Handled = false` (WER generează minidump; `e.Handled = true` din main era greșit — înghițea excepțiile silențios).
+
+**Root cause final descoperit de utilizator:**
+- **4 versiuni de Windows SDK instalate simultan pe PC.** La build/run, Windows încărca o versiune incompatibilă de runtime față de cea compilată în proiect (`WindowsAppSDKSelfContained=true`, `WindowsPackageType=None`). Rezultatul: crash imediat la pornire, înainte de orice log.
+- **Rezolvare:** dezinstalate 3 versiuni SDK. Aplicația funcționează.
+- **Lecție:** pe mașina de dev, păstrați o singură versiune de Windows App SDK / Windows SDK instalată, sau folosiți publish self-contained care include runtime-urile corect indiferent de ce e instalat pe sistem.
+
+**Fișiere modificate în această sesiune:**
+- `Dashboard/MainViewModel.cs` (PR #52 + #54, merged)
+- `Dashboard/CoreManager.cs` (PR #52, merged)
+- `Dashboard/App.xaml.cs` (PR #54 merged + branch curent îmbunătățit)
+- `Core/CMakeLists.txt` (PR #53, merged)
+- `Core/CoreApi.cpp` (branch curent, nemerged — crash handler)
+
+**Next steps:**
+1. Merge branch `claude/reset-working-commit-o1Ia3` → main (PR existent pe GitHub).
+2. Rebuild `CrystalFrame.Core.dll` cu CMake (pentru static CRT + crash handler activ).
+3. Test publish → verifică că `%LOCALAPPDATA%\CrystalFrame\CrystalFrame.log` apare la prima pornire.
+4. Start implementare **S6** (iconițe reale din sistem) — plan detaliat deja în secțiunea 5 din WORKLOG.
+
+---
 
 ### Session 8 note (2026-02-27) — First-run safe mode + diagnostic session
 

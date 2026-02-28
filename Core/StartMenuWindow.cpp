@@ -16,8 +16,51 @@
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "powrprof.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace CrystalFrame {
+
+// ── File-scope helpers ────────────────────────────────────────────────────────
+
+/// S6.2: Search the All-Programs tree (case-insensitive) for a shortcut node
+/// whose display name matches |name|. Returns its lnkPath, or empty string.
+/// Used to find a .lnk file for pinned UWP apps (ms-settings:, calc.exe, etc.)
+/// whose command string is not a filesystem path that SHGetFileInfoW can resolve.
+static std::wstring FindLnkPathByName(const std::vector<MenuNode>& nodes,
+                                       const std::wstring& name) {
+    for (const auto& node : nodes) {
+        if (!node.isFolder) {
+            if (_wcsicmp(node.name.c_str(), name.c_str()) == 0 && !node.lnkPath.empty())
+                return node.lnkPath;
+        } else {
+            auto found = FindLnkPathByName(node.children, name);
+            if (!found.empty()) return found;
+        }
+    }
+    return {};
+}
+
+/// Enables SE_SHUTDOWN_NAME in the current process token so that
+/// ExitWindowsEx succeeds without UAC elevation on standard user accounts.
+/// Returns true if the privilege was successfully enabled.
+static bool EnableShutdownPrivilege() {
+    HANDLE hToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(),
+                          TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
+        return false;
+
+    TOKEN_PRIVILEGES tkp = {};
+    tkp.PrivilegeCount   = 1;
+    tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    bool ok = LookupPrivilegeValueW(nullptr, SE_SHUTDOWN_NAME,
+                                    &tkp.Privileges[0].Luid) != FALSE;
+    if (ok) {
+        AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, nullptr, nullptr);
+        ok = (GetLastError() != ERROR_NOT_ALL_ASSIGNED);
+    }
+    CloseHandle(hToken);
+    return ok;
+}
 
 // ── Pinned apps (vertical list, left column) ──────────────────────────────────
 const PinnedItem StartMenuWindow::s_pinnedItems[StartMenuWindow::PROG_COUNT] = {
@@ -131,9 +174,24 @@ bool StartMenuWindow::Initialize() {
     // the WinUI 3 host already initialises COM on the main thread.
 
     // S6.1 — Pinned app icons (32×32, scaled to PROG_ICON_SZ at paint time).
+    // First pass: direct SHGetFileInfoW on the command string (works for plain .exe names).
     for (int i = 0; i < PROG_COUNT; ++i) {
         SHFILEINFOW sfi = {};
         if (SHGetFileInfoW(s_pinnedItems[i].command, 0, &sfi, sizeof(sfi),
+                           SHGFI_ICON | SHGFI_LARGEICON) && sfi.hIcon)
+            m_pinnedIcons[i] = sfi.hIcon;
+    }
+
+    // S6.2 — UWP fallback: for pinned apps whose command is a URI (ms-settings:)
+    // or a stub name that the shell cannot resolve directly, search the All Programs
+    // tree for a shortcut with the same display name and use its .lnk path instead.
+    // This covers Settings, Calculator, Edge, and any other UWP app in the list.
+    for (int i = 0; i < PROG_COUNT; ++i) {
+        if (m_pinnedIcons[i]) continue;  // already resolved in S6.1
+        std::wstring lnkPath = FindLnkPathByName(m_programTree, s_pinnedItems[i].name);
+        if (lnkPath.empty()) continue;
+        SHFILEINFOW sfi = {};
+        if (SHGetFileInfoW(lnkPath.c_str(), 0, &sfi, sizeof(sfi),
                            SHGFI_ICON | SHGFI_LARGEICON) && sfi.hIcon)
             m_pinnedIcons[i] = sfi.hIcon;
     }
@@ -1434,14 +1492,27 @@ void StartMenuWindow::ShowPowerMenu() {
     if (cmd == 0) return;
     Hide();
 
+    // Actions that call ExitWindowsEx require SE_SHUTDOWN_NAME privilege;
+    // enable it once here before the switch (no-op if already held).
     switch (cmd) {
-        case 1: LockWorkStation(); break;   // closest to Switch User on modern Windows
-        case 2: ExitWindowsEx(EWX_LOGOFF  | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_OTHER); break;
+        case 2: // Log Off
+        case 4: // Restart
+        case 7: // Shut down
+            EnableShutdownPrivilege();
+            break;
+        default:
+            break;
+    }
+
+    switch (cmd) {
+        case 1: LockWorkStation(); break;   // Switch User — shows lock screen (Win11 approach)
+        case 2: ExitWindowsEx(EWX_LOGOFF   | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_APPLICATION); break;
         case 3: LockWorkStation(); break;
-        case 4: ExitWindowsEx(EWX_REBOOT  | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_OTHER); break;
-        case 5: SetSuspendState(FALSE, FALSE, FALSE); break;
-        case 6: SetSuspendState(TRUE,  FALSE, FALSE); break;
-        case 7: ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_OTHER); break;
+        case 4: ExitWindowsEx(EWX_REBOOT   | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_APPLICATION); break;
+        case 5: SetSuspendState(FALSE, FALSE, FALSE); break;   // Sleep
+        case 6: SetSuspendState(TRUE,  FALSE, FALSE); break;   // Hibernate
+        case 7: ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCEIFHUNG,
+                              SHTDN_REASON_MAJOR_APPLICATION); break;
     }
 }
 
@@ -1631,7 +1702,9 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         // Bottom bar — Shut down button (direct action) and arrow (dropdown)
         if (IsOverShutdownButton(pt)) {
             Hide();
-            ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_OTHER);
+            EnableShutdownPrivilege();
+            ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCEIFHUNG,
+                          SHTDN_REASON_MAJOR_APPLICATION);
             return 0;
         }
         if (IsOverArrowButton(pt)) { ShowPowerMenu(); return 0; }

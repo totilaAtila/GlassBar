@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -41,8 +42,23 @@ namespace CrystalFrame.Dashboard
             InitializeComponent();
             this.UnhandledException += (sender, e) =>
             {
+                // Write to CrystalFrame.log so the exception is visible even in production.
+                // Do NOT set e.Handled = true — let WER generate a crash dump for diagnosis.
+                try
+                {
+                    var logDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "CrystalFrame");
+                    Directory.CreateDirectory(logDir);
+                    File.AppendAllText(
+                        Path.Combine(logDir, "CrystalFrame.log"),
+                        $"\n[{DateTime.Now:yyyy-MM-dd HH:mm:ss}][-----][ERROR] " +
+                        $"UNHANDLED UI EXCEPTION: {e.Exception}\n");
+                }
+                catch { /* cannot log — crash proceeds normally */ }
+
                 Debug.WriteLine($"[UNHANDLED] {e.Exception}");
-                e.Handled = true;
+                // e.Handled intentionally left false so WER captures a minidump.
             };
         }
 

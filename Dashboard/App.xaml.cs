@@ -39,6 +39,11 @@ namespace CrystalFrame.Dashboard
         public App()
         {
             InitializeComponent();
+            this.UnhandledException += (sender, e) =>
+            {
+                Debug.WriteLine($"[UNHANDLED] {e.Exception}");
+                e.Handled = true;
+            };
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)

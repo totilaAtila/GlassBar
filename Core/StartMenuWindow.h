@@ -170,6 +170,11 @@ private:
     // Phase S2: All Programs tree pre-cached at Initialize().
     std::vector<MenuNode> m_programTree;
 
+    // S6 — real system icons loaded once in Initialize(), freed in Shutdown().
+    // NULL entries mean "no icon available → fall back to DrawIconSquare".
+    HICON m_pinnedIcons[PROG_COUNT]          = {};  // 32×32 for pinned app list
+    HICON m_rightIcons[RIGHT_ITEM_COUNT]     = {};  // 16×16 for right-column items
+
 
     // ── Layout constants (Windows 7 style) ──────────────────────────────────
     static constexpr int WIDTH  = 400;   // 450 - 50 (left panel narrowed ~7 chars)
@@ -261,10 +266,14 @@ private:
     // Bottom bar
     void PaintBottomBar(HDC hdc, const RECT& cr);
 
-    // Draw a colored rounded icon square with a short label inside
+    // Draw a colored rounded icon square with a short label inside (S6 fallback)
     void DrawIconSquare(HDC hdc, int cx, int cy, int sz,
                         COLORREF bgColor, const wchar_t* label,
                         COLORREF textColor = RGB(255, 255, 255));
+
+    // S6 — icon lifecycle helpers (walk m_programTree recursively)
+    void LoadNodeIcons(std::vector<MenuNode>& nodes);
+    void FreeNodeIcons(std::vector<MenuNode>& nodes);
 
     // Draw a subtle horizontal separator line
     void DrawSeparator(HDC hdc, int y, int x1, int x2);

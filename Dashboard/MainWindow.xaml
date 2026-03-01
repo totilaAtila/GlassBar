@@ -4,16 +4,18 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="CrystalFrame Settings"
     MinWidth="360"
-    MinHeight="420"
-    WindowStartupLocation="CenterScreen">
+    MinHeight="420">
 
     <!-- Fără RequestedTheme forțat — urmează tema sistemului.
          NOTĂ: Window.Resources cu Style+ControlTemplate crashează XamlCompiler net472 Pass1.
          Proprietățile butoanelor sunt aplicate direct pe fiecare control (workaround).
 
+         NOTE WinUI 3: WindowStartupLocation nu există în WinUI 3 (WPF-only).
+                       UniformGrid nu există în WinUI 3 standard — înlocuit cu Grid 2×*.
+
          Structură Header (fix) / ScrollViewer pe Height=* / Footer (fix):
          headerul și footerul rămân întotdeauna ancorate, indiferent de dimensiunea ferestrei.
-         MaxWidth pe conținutul din scroll = lizibil pe orice TV/monitor ultra-wide. -->
+         MaxWidth pe conținutul din scroll = lizibil și pe monitoare/TV ultra-wide. -->
 
     <Grid x:Name="RootGrid"
           HorizontalAlignment="Stretch"
@@ -49,9 +51,14 @@
                         Spacing="6"
                         Margin="0,0,0,8">
 
-                <!-- Nav: Taskbar + Start Menu — egale ca lățime via UniformGrid -->
-                <UniformGrid Rows="1" Columns="2">
-                    <Button x:Name="NavTaskbar"
+                <!-- Nav: Taskbar + Start Menu — egale ca lățime via Grid 2 coloane * -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            x:Name="NavTaskbar"
                             MinHeight="44"
                             Margin="0,0,3,0"
                             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
@@ -63,7 +70,8 @@
                             Click="Nav_Taskbar_Click">
                         <TextBlock Text="Taskbar" FontSize="13"/>
                     </Button>
-                    <Button x:Name="NavStartMenu"
+                    <Button Grid.Column="1"
+                            x:Name="NavStartMenu"
                             MinHeight="44"
                             Margin="3,0,0,0"
                             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
@@ -75,7 +83,7 @@
                             Click="Nav_Start_Click">
                         <TextBlock Text="Start Menu" FontSize="13"/>
                     </Button>
-                </UniformGrid>
+                </Grid>
 
                 <!-- Separator -->
                 <Border Height="1"

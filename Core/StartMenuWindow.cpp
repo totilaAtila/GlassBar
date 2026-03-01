@@ -805,7 +805,7 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
         // Icon — real system icon when available, colored square fallback
         int iconCX = MARGIN + PROG_ICON_SZ / 2 + 4;
         int iconCY = itemY + PROG_ITEM_H / 2;
-        if (m_pinnedIcons[i]) {
+        if (iconsReady && m_pinnedIcons[i]) {
             DrawIconEx(hdc, iconCX - PROG_ICON_SZ / 2, iconCY - PROG_ICON_SZ / 2,
                        m_pinnedIcons[i], PROG_ICON_SZ, PROG_ICON_SZ, 0, nullptr, DI_NORMAL);
         } else {
@@ -889,6 +889,7 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
 // ─────────────────────────────────────────────────────────────────────────────
 void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
     (void)cr;
+    const bool iconsReady = m_iconsLoaded.load(std::memory_order_acquire);
     SetBkMode(hdc, TRANSPARENT);
 
     const auto& nodes = CurrentApNodes();
@@ -933,7 +934,7 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
         int iconCX = MARGIN + PROG_ICON_SZ / 2 + 4;
         int iconCY = itemY + PROG_ITEM_H / 2;
 
-        if (node.hIcon) {
+        if (iconsReady && node.hIcon) {
             // Real system icon from shell
             DrawIconEx(hdc, iconCX - PROG_ICON_SZ / 2, iconCY - PROG_ICON_SZ / 2,
                        node.hIcon, PROG_ICON_SZ, PROG_ICON_SZ, 0, nullptr, DI_NORMAL);
@@ -1078,6 +1079,7 @@ void StartMenuWindow::PaintWin7SearchBox(HDC hdc, const RECT& cr) {
 // Paints the right-column panel: background, username header, shell links.
 // Every non-separator entry in s_rightItems is drawn and is clickable.
 void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
+    const bool iconsReady = m_iconsLoaded.load(std::memory_order_acquire);
     // ── Background ───────────────────────────────────────────────────────────
     COLORREF rcBgColor = CalculateSubtleColor();
     HBRUSH   rcBg      = CreateSolidBrush(rcBgColor);
@@ -1160,7 +1162,7 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
             }
 
             // Item icon (16×16) — drawn at left edge of item row
-            if (m_rightIcons[i]) {
+            if (iconsReady && m_rightIcons[i]) {
                 int iconX = RC_X + 4;
                 int iconY = y + (RC_ITEM_H - 16) / 2;
                 DrawIconEx(hdc, iconX, iconY, m_rightIcons[i], 16, 16, 0, nullptr, DI_NORMAL);
@@ -1631,6 +1633,7 @@ int StartMenuWindow::GetSubMenuItemAtPoint(POINT pt) {
 
 void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
     if (!m_subMenuOpen) return;
+    const bool iconsReady = m_iconsLoaded.load(std::memory_order_acquire);
     const auto& nodes  = CurrentApNodes();
     const auto& folder = nodes[static_cast<size_t>(m_subMenuNodeIdx)];
     int count = min(SM_MAX_VIS, static_cast<int>(folder.children.size()));
@@ -1690,7 +1693,7 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
         static constexpr int SM_ICON_SZ = 20;
         int iconCX = SM_X + 14;
         int iconCY = itemY + SM_ITEM_H / 2;
-        if (child.hIcon) {
+        if (iconsReady && child.hIcon) {
             DrawIconEx(hdc, iconCX - SM_ICON_SZ / 2, iconCY - SM_ICON_SZ / 2,
                        child.hIcon, SM_ICON_SZ, SM_ICON_SZ, 0, nullptr, DI_NORMAL);
             SelectObject(hdc, child.isFolder ? boldF : itemF);

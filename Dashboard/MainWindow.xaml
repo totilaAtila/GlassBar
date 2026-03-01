@@ -6,17 +6,26 @@
 
     <!-- Fără RequestedTheme forțat — urmează tema sistemului.
          NOTĂ: Window.Resources cu Style+ControlTemplate crashează XamlCompiler net472 Pass1.
-         Proprietățile butoanelor sunt aplicate direct pe fiecare control (workaround). -->
+         Proprietățile butoanelor sunt aplicate direct pe fiecare control (workaround).
+
+         NOTE WinUI 3: WindowStartupLocation, MinWidth, MinHeight pe Window nu există în
+                       WinUI 3 (WPF-only). UniformGrid absent din WinUI 3 standard —
+                       înlocuit cu Grid 2×*. MinWidth/MinHeight pot fi setate programatic
+                       via AppWindow.Resize() dacă e necesar în viitor.
+
+         Structură Header (fix) / ScrollViewer pe Height=* / Footer (fix):
+         headerul și footerul rămân întotdeauna ancorate, indiferent de dimensiunea ferestrei.
+         MaxWidth pe conținutul din scroll = lizibil și pe monitoare/TV ultra-wide. -->
+
     <Grid x:Name="RootGrid"
-          HorizontalAlignment="Left"
-          VerticalAlignment="Top"
+          HorizontalAlignment="Stretch"
+          VerticalAlignment="Stretch"
           Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
-        <!-- Singura coloană — nu mai există side panel -->
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>  <!-- Header — mereu vizibil -->
+            <RowDefinition Height="*"/>     <!-- Conținut principal cu scroll -->
+            <RowDefinition Height="Auto"/>  <!-- Footer — mereu vizibil -->
         </Grid.RowDefinitions>
 
         <!-- Header -->
@@ -30,113 +39,128 @@
                        Margin="0,-4,0,0"/>
         </StackPanel>
 
-        <!-- Butoane navigare + controale stare -->
-        <StackPanel Grid.Row="1" Spacing="6" Margin="12,0,12,0">
+        <!-- Zona de conținut cu scroll -->
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Padding="12,0,12,0">
 
-            <!-- Nav: Taskbar -->
-            <Button x:Name="NavTaskbar"
-                    Height="44"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Left"
-                    VerticalContentAlignment="Center"
-                    Padding="12,0"
-                    BorderThickness="0"
-                    CornerRadius="6"
-                    Click="Nav_Taskbar_Click">
-                <TextBlock Text="Taskbar" FontSize="13"/>
-            </Button>
+            <!-- MaxWidth + Center: conținut lizibil pe ultra-wide, centrat pe ferestre mari -->
+            <StackPanel MaxWidth="480"
+                        HorizontalAlignment="Center"
+                        Spacing="6"
+                        Margin="0,0,0,8">
 
-            <!-- Nav: Start Menu -->
-            <Button x:Name="NavStartMenu"
-                    Height="44"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Left"
-                    VerticalContentAlignment="Center"
-                    Padding="12,0"
-                    BorderThickness="0"
-                    CornerRadius="6"
-                    Click="Nav_Start_Click">
-                <TextBlock Text="Start Menu" FontSize="13"/>
-            </Button>
-
-            <!-- Separator -->
-            <Border Height="1"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                    Margin="0,4"/>
-
-            <!-- Core Engine -->
-            <Border Height="44"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    CornerRadius="6"
-                    Padding="12,0">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <Ellipse Grid.Column="0"
-                             x:Name="CoreStatusDot"
-                             Width="8" Height="8" Fill="Gray"
-                             VerticalAlignment="Center"
-                             Margin="0,0,8,0"/>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                        <TextBlock Text="Core Engine"
-                                   FontSize="12" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
-                        <TextBlock x:Name="CoreStatusDetail"
-                                   FontSize="9"
-                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                   TextTrimming="CharacterEllipsis"/>
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="2"
-                                  x:Name="CoreRunningToggle"
-                                  OnContent="ON" OffContent="OFF"
-                                  MinWidth="0"
-                                  Toggled="CoreRunning_Toggled"
-                                  VerticalAlignment="Center"
-                                  Margin="4,-4,0,0"/>
-                </Grid>
-            </Border>
-
-            <!-- Run at startup -->
-            <Border Height="44"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    CornerRadius="6"
-                    Padding="12,0">
+                <!-- Nav: Taskbar + Start Menu — egale ca lățime via Grid 2 coloane * -->
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0"
-                               Text="Run at startup"
-                               FontSize="12"
-                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                               VerticalAlignment="Center"/>
-                    <ToggleSwitch Grid.Column="1"
-                                  x:Name="RunAtStartupToggle"
-                                  OnContent="ON" OffContent="OFF"
-                                  MinWidth="0"
-                                  Toggled="RunAtStartup_Toggled"
-                                  VerticalAlignment="Center"
-                                  Margin="4,-4,0,0"/>
+                    <Button Grid.Column="0"
+                            x:Name="NavTaskbar"
+                            MinHeight="44"
+                            Margin="0,0,3,0"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            BorderThickness="0"
+                            CornerRadius="6"
+                            Click="Nav_Taskbar_Click">
+                        <TextBlock Text="Taskbar" FontSize="13"/>
+                    </Button>
+                    <Button Grid.Column="1"
+                            x:Name="NavStartMenu"
+                            MinHeight="44"
+                            Margin="3,0,0,0"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            BorderThickness="0"
+                            CornerRadius="6"
+                            Click="Nav_Start_Click">
+                        <TextBlock Text="Start Menu" FontSize="13"/>
+                    </Button>
                 </Grid>
-            </Border>
 
-        </StackPanel>
+                <!-- Separator -->
+                <Border Height="1"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        Margin="0,4"/>
 
-        <!-- Footer: status conexiune -->
+                <!-- Core Engine — MinHeight flexibil; TextWrapping în loc de TextTrimming -->
+                <Border MinHeight="44"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        CornerRadius="6"
+                        Padding="12,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Ellipse Grid.Column="0"
+                                 x:Name="CoreStatusDot"
+                                 Width="8" Height="8" Fill="Gray"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,8,0"/>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Core Engine"
+                                       FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
+                            <TextBlock x:Name="CoreStatusDetail"
+                                       FontSize="10"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="2"
+                                      x:Name="CoreRunningToggle"
+                                      OnContent="ON" OffContent="OFF"
+                                      MinWidth="0"
+                                      Toggled="CoreRunning_Toggled"
+                                      VerticalAlignment="Center"
+                                      Margin="4,-4,0,0"/>
+                    </Grid>
+                </Border>
+
+                <!-- Run at startup — MinHeight flexibil -->
+                <Border MinHeight="44"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        CornerRadius="6"
+                        Padding="12,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="Run at startup"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap"/>
+                        <ToggleSwitch Grid.Column="1"
+                                      x:Name="RunAtStartupToggle"
+                                      OnContent="ON" OffContent="OFF"
+                                      MinWidth="0"
+                                      Toggled="RunAtStartup_Toggled"
+                                      VerticalAlignment="Center"
+                                      Margin="4,-4,0,0"/>
+                    </Grid>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer: status conexiune — MaxWidth=280 eliminat, consistent cu restul -->
         <Border Grid.Row="2"
                 BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                 BorderThickness="0,1,0,0"
-                Margin="0,8,0,0"
                 Padding="16,10,16,12">
             <StackPanel Spacing="3">
                 <TextBlock x:Name="ConnectionStatusText"
-                           MaxWidth="280"
                            FontSize="10"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            TextWrapping="Wrap"/>

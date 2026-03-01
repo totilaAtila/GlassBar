@@ -1,6 +1,6 @@
 
 # WORKLOG — Win7-Revival / CrystalFrame
-Last updated: 2026-03-01 (session 12 — startup freeze fix)
+Last updated: 2026-03-01 (session 13 — Dashboard layout best-mix refactor)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -110,6 +110,38 @@ New requirement (non-negotiable, §10):
 2. Rebuild `CrystalFrame.Core.dll` cu CMake (pentru static CRT + crash handler activ).
 3. Test publish → verifică că `%LOCALAPPDATA%\CrystalFrame\CrystalFrame.log` apare la prima pornire.
 4. ✅ S6 implementat în această sesiune — iconițe reale din sistem (detalii în Session 9 S6 note de mai jos).
+
+---
+
+### Session 13 — Dashboard layout best-mix refactor (2026-03-01)
+
+**Branch:** `claude/refactor-dashboard-layout-6XyNx`
+
+**Obiectiv:** Refactorizare `Dashboard/MainWindow.xaml` — layout adaptiv pentru orice dimensiune de
+ecran (compact 360px → TV ultra-wide), pornind de la analiza a 3 variante și integrând elementele
+optime din fiecare.
+
+**Decizii de design — sursa fiecărui element:**
+
+| Element | Luat din | Motiv |
+|---|---|---|
+| `HorizontalAlignment="Stretch"` pe RootGrid | Varianta C | Umple corect fereastra la orice dimensiune |
+| Structură 3 rânduri: Header (Auto) / ScrollViewer (`*`) / Footer (Auto) | Varianta C | Header și footer **mereu ancorate** pe ecran |
+| `MinHeight="420"` pe Window | versiunea anterioară | Fereastra nu poate fi redusă până dispare conținut |
+| `MinWidth="360"` | Varianta C | Mai generos decât 320; mai sigur pe display-uri mici |
+| `MaxWidth="480" + HorizontalAlignment="Center"` pe StackPanel din ScrollViewer | versiunea anterioară | Lizibil pe TV/ultra-wide; centrat pe ferestre mari |
+| `MinHeight` (nu `Height` fix) pe butoane și carduri | Varianta C | Se extind dacă textul de status dinamic e mai lung |
+| `TextWrapping="Wrap"` pe `CoreStatusDetail` | versiunea anterioară | Textul de status nu mai e tăiat (`TextTrimming` eliminat) |
+| `UniformGrid` pe butoanele nav Taskbar/Start Menu | versiunea anterioară | Butoanele egale ca lățime indiferent de conținut |
+| `MaxWidth="280"` eliminat de pe `ConnectionStatusText` | versiunea anterioară | Constrâns uniform de `MaxWidth=480` al părintelui |
+
+**Comportament rezultat:**
+- La fereastră mică (360×420): header + footer ancorate, conținutul scrollabil.
+- La fereastră mare / TV 4K: conținut centrat cu MaxWidth=480, header și footer rămân ancorate.
+- `WindowStartupLocation="CenterScreen"` asigură poziționare inițială corectă.
+
+**Fișiere modificate:**
+- `Dashboard/MainWindow.xaml` (refactorizat complet — 145 linii noi vs 148 anterioare)
 
 ---
 

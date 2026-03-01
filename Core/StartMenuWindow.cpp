@@ -589,8 +589,8 @@ void StartMenuWindow::LoadRecentPrograms() {
     // ROT13 decode: shift alphabetic chars by 13 positions.
     auto rot13 = [](std::wstring s) -> std::wstring {
         for (wchar_t& c : s) {
-            if      (c >= L'a' && c <= L'z') c = L'a' + (c - L'a' + 13) % 26;
-            else if (c >= L'A' && c <= L'Z') c = L'A' + (c - L'A' + 13) % 26;
+            if      (c >= L'a' && c <= L'z') c = static_cast<wchar_t>(L'a' + (c - L'a' + 13) % 26);
+            else if (c >= L'A' && c <= L'Z') c = static_cast<wchar_t>(L'A' + (c - L'A' + 13) % 26);
         }
         return s;
     };
@@ -625,7 +625,8 @@ void StartMenuWindow::LoadRecentPrograms() {
         ++maxNameLen; // include null terminator
 
         std::vector<wchar_t> nameBuf(maxNameLen + 1);
-        std::vector<BYTE>    dataBuf(max(maxDataLen, (DWORD)72));
+        const DWORD kMinDataBuf = 72u;
+        std::vector<BYTE>    dataBuf(maxDataLen > kMinDataBuf ? maxDataLen : kMinDataBuf);
 
         for (DWORD idx = 0; idx < valueCount; ++idx) {
             DWORD nameLen = maxNameLen;
@@ -665,7 +666,7 @@ void StartMenuWindow::LoadRecentPrograms() {
             // Expand environment variables (%windir%, %appdata%, etc.)
             wchar_t expanded[MAX_PATH] = {};
             DWORD expLen = ExpandEnvironmentStringsW(decoded.c_str(), expanded,
-                                                     static_cast<DWORD>(std::size(expanded)));
+                                                     static_cast<DWORD>(MAX_PATH));
             std::wstring path = (expLen > 1 && expLen <= MAX_PATH) ? expanded : decoded;
 
             entries.push_back({path, count, lastRun});
@@ -1400,8 +1401,7 @@ void StartMenuWindow::ExecutePinnedItem(int index) {
         // S7 — Recently used item (index == PROG_COUNT + recentIdx)
         int ri = index - PROG_COUNT;
         if (ri >= static_cast<int>(m_recentItems.size())) return;
-        CF_LOG(Info, "ExecuteRecentItem: " << ri
-               << " (" << m_recentItems[ri].name.c_str() << ")");
+        CF_LOG(Info, "ExecuteRecentItem index=" << ri);
         ShellExecuteW(NULL, L"open", m_recentItems[ri].exePath.c_str(),
                       NULL, NULL, SW_SHOW);
     }

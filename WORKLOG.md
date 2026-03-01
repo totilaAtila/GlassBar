@@ -1,6 +1,6 @@
 
 # WORKLOG — Win7-Revival / CrystalFrame
-Last updated: 2026-02-28 (session 10 — S7 recently used programs via UserAssist)
+Last updated: 2026-03-01 (session 11 — S7 build fix)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -110,6 +110,26 @@ New requirement (non-negotiable, §10):
 2. Rebuild `CrystalFrame.Core.dll` cu CMake (pentru static CRT + crash handler activ).
 3. Test publish → verifică că `%LOCALAPPDATA%\CrystalFrame\CrystalFrame.log` apare la prima pornire.
 4. ✅ S6 implementat în această sesiune — iconițe reale din sistem (detalii în Session 9 S6 note de mai jos).
+
+---
+
+### Session 11 — S7 build fix (2026-03-01) — MSVC compatibility
+
+**Context:** Build GitHub Actions "Build C++ Core" a eșuat după merge-ul PR #60 (S7 UserAssist).
+Log-urile nu au putut fi accesate direct (Azure blob redirect blocat prin proxy); fix-urile
+au fost aplicate proactiv pe baza analizei compatibilității MSVC C++20 + `/permissive-`:
+
+**Fix-uri aplicate în `Core/StartMenuWindow.cpp`:**
+1. **ROT13 narrowing** — `c = L'a' + expr` → `c = static_cast<wchar_t>(L'a' + expr)`:
+   Suprima C4244 "possible loss of data from int to wchar_t" (wchar_t aritmetică → int, reatribuire la wchar_t).
+2. **`max()` macro eliminat** — `max(maxDataLen, (DWORD)72)` → ternary explicit:
+   Evită potențiale conflicte cu macrourile Windows.h după includerea `<algorithm>`.
+3. **`std::size(expanded)` → `MAX_PATH`** — `expanded` este `wchar_t[MAX_PATH]`, valoare identică,
+   fără dependință implicită pe `std::size` pentru array brut (deși disponibil prin `<algorithm>` → `<iterator>`).
+4. **CF_LOG cu `const wchar_t*`** — eliminat streaming-ul `m_recentItems[ri].name.c_str()` în
+   `std::ostringstream` (stream îngust): rimâne doar indexul, evitând comportament non-portabil.
+
+**Fișiere modificate:** `Core/StartMenuWindow.cpp`
 
 ---
 

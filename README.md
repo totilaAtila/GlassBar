@@ -7,6 +7,8 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Build](https://github.com/totilaAtila/Win7-Revival/actions/workflows/build.yml/badge.svg)
 
+![CrystalFrame Screenshot](assets/Crystal%20Frame.png)
+
 ---
 
 ## Features

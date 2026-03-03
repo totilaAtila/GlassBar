@@ -145,6 +145,24 @@ namespace CrystalFrame.Dashboard
             set { if (SetProperty(ref _startBlur, value)) _config.StartBlur = value; }
         }
 
+        // S-B: Keep Start Menu open for Dashboard preview (not persisted)
+        private bool _startMenuPinned;
+        public bool StartMenuPinned
+        {
+            get => _startMenuPinned;
+            set => SetProperty(ref _startMenuPinned, value);
+        }
+
+        // S-E: Border/accent color
+        private int _startBorderColorR;
+        public int StartBorderColorR { get => _startBorderColorR; set { if (SetProperty(ref _startBorderColorR, value)) _config.StartBorderColorR = value; } }
+
+        private int _startBorderColorG;
+        public int StartBorderColorG { get => _startBorderColorG; set { if (SetProperty(ref _startBorderColorG, value)) _config.StartBorderColorG = value; } }
+
+        private int _startBorderColorB;
+        public int StartBorderColorB { get => _startBorderColorB; set { if (SetProperty(ref _startBorderColorB, value)) _config.StartBorderColorB = value; } }
+
         private bool _taskbarEnabled;
         public bool TaskbarEnabled
         {
@@ -269,6 +287,10 @@ namespace CrystalFrame.Dashboard
                 StartShowVideos = _config.StartShowVideos;
                 StartShowRecentFiles = _config.StartShowRecentFiles;
 
+                StartBorderColorR = _config.StartBorderColorR;
+                StartBorderColorG = _config.StartBorderColorG;
+                StartBorderColorB = _config.StartBorderColorB;
+
                 // Read startup state from registry (not stored in config.json)
                 _runAtStartup = StartupManager.IsEnabled();
                 PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(RunAtStartup)));
@@ -307,6 +329,7 @@ namespace CrystalFrame.Dashboard
                 _core.SetStartMenuOpacity(StartOpacity);
                 _core.SetStartMenuBackgroundColor(StartBgColorR, StartBgColorG, StartBgColorB);
                 _core.SetStartMenuTextColor(StartTextColorR, StartTextColorG, StartTextColorB);
+                _core.SetStartMenuBorderColor(StartBorderColorR, StartBorderColorG, StartBorderColorB);
                 _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
                                         StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
 
@@ -481,6 +504,51 @@ namespace CrystalFrame.Dashboard
             // Apply to Core
             _core.SetStartMenuItems(StartShowControlPanel, StartShowDeviceManager, StartShowInstalledApps,
                                     StartShowDocuments, StartShowPictures, StartShowVideos, StartShowRecentFiles);
+        }
+
+        // S-B: toggle Keep-Open preview
+        public void OnStartMenuPinnedChanged(bool pinned)
+        {
+            StartMenuPinned = pinned;
+            _core.SetStartMenuPinned(pinned);
+        }
+
+        // S-E: border color sliders
+        public void OnStartBorderColorChanged(int r, int g, int b)
+        {
+            StartBorderColorR = r;
+            StartBorderColorG = g;
+            StartBorderColorB = b;
+            _core.SetStartMenuBorderColor(r, g, b);
+        }
+
+        // S-F: apply theme preset
+        public void ApplyPreset(string name)
+        {
+            switch (name)
+            {
+                case "ClassicWin7":
+                    OnStartBgColorChanged(20, 60, 120);
+                    OnStartTextColorChanged(255, 255, 255);
+                    OnStartBorderColorChanged(80, 130, 190);
+                    OnStartOpacityChanged(85);
+                    OnStartBlurChanged(false);
+                    break;
+                case "AeroGlass":
+                    OnStartBgColorChanged(20, 40, 80);
+                    OnStartTextColorChanged(255, 255, 255);
+                    OnStartBorderColorChanged(60, 100, 160);
+                    OnStartOpacityChanged(55);
+                    OnStartBlurChanged(true);
+                    break;
+                case "Dark":
+                    OnStartBgColorChanged(18, 18, 22);
+                    OnStartTextColorChanged(200, 200, 200);
+                    OnStartBorderColorChanged(60, 60, 65);
+                    OnStartOpacityChanged(90);
+                    OnStartBlurChanged(false);
+                    break;
+            }
         }
 
         private void OnStatusUpdated(object sender, CoreNative.CoreStatus status)

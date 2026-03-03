@@ -92,6 +92,14 @@ namespace CrystalFrame.Dashboard
             [MarshalAs(UnmanagedType.Bool)] bool videos,
             [MarshalAs(UnmanagedType.Bool)] bool recentFiles);
 
+        // S-B: pin Start Menu open for Dashboard preview
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void CoreSetStartMenuPinned([MarshalAs(UnmanagedType.Bool)] bool pinned);
+
+        // S-E: explicit border/accent color (0x00RRGGBB)
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void CoreSetStartMenuBorderColor(uint rgb);
+
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void CoreGetStatus(ref CoreStatus status);
 

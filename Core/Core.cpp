@@ -302,6 +302,10 @@ void Core::SetStartBlur(bool enabled) {
     if (m_config) {
         m_config->SetStartBlur(enabled);
     }
+    // S15 blur fix: also apply to the custom StartMenuWindow (was missing before)
+    if (m_startMenuWindow) {
+        m_startMenuWindow->SetBlur(enabled);
+    }
 }
 
 void Core::SetStartMenuHookEnabled(bool enabled) {
@@ -358,6 +362,20 @@ void Core::OnCustomStartMenuRequested(int x, int y) {
 void Core::RefreshTransparency() {
     if (m_renderer) {
         m_renderer->RefreshTransparency();
+    }
+}
+
+void Core::SetStartMenuPinned(bool pinned) {
+    if (m_startMenuWindow) {
+        m_startMenuWindow->SetPinned(pinned);
+        CF_LOG(Info, "Start Menu " << (pinned ? "pinned open" : "unpinned"));
+    }
+}
+
+void Core::SetStartMenuBorderColor(DWORD rgb) {
+    if (m_startMenuWindow) {
+        m_startMenuWindow->SetBorderColor(static_cast<COLORREF>(rgb));
+        CF_LOG(Info, "Start Menu border color set to 0x" << std::hex << rgb << std::dec);
     }
 }
 

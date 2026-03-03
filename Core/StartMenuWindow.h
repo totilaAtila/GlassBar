@@ -110,6 +110,18 @@ public:
 
     bool IsVisible() const { return m_visible; }
 
+    /// S15 — Enable/disable blur/acrylic background on the Start Menu window
+    void SetBlur(bool useBlur);
+
+    /// S-B — Pin Start Menu open for Dashboard preview (Hide() becomes no-op when pinned)
+    void SetPinned(bool pinned);
+
+    /// S-B — Force-hide even when pinned (called when pinned toggle is turned off)
+    void ForceHide();
+
+    /// S-E — Set explicit border/accent color (overrides auto-calculated value)
+    void SetBorderColor(COLORREF color);
+
     /// Get current window bounds in screen coordinates (empty RECT if hidden)
     RECT GetWindowBounds() const;
 
@@ -175,8 +187,9 @@ private:
     int      m_subMenuNodeIdx    = -1;  // absolute AP node that opened the submenu
     int      m_subMenuHoveredIdx = -1;  // visual index in submenu list (-1 = none)
 
-    static constexpr UINT_PTR HOVER_TIMER_ID  = 1;
-    static constexpr UINT     HOVER_DELAY_MS  = 400;
+    static constexpr UINT_PTR HOVER_TIMER_ID      = 1;
+    static constexpr UINT     HOVER_DELAY_MS      = 50;   // was 400 — snappy submenu opening
+    static constexpr UINT_PTR HOVER_ANIM_TIMER_ID = 2;    // S-C: hover fade-in animation
 
     // Cached Windows login name for the right-column header
     wchar_t m_username[64] = {};
@@ -196,8 +209,26 @@ private:
     std::atomic<bool>    m_iconsLoaded{false};
 
     // Posted to m_hwnd by the icon thread when loading is done → triggers repaint.
-    static constexpr UINT WM_ICONS_LOADED = WM_USER + 101;
+    static constexpr UINT WM_ICONS_LOADED  = WM_USER + 101;
+    static constexpr UINT WM_AVATAR_LOADED = WM_USER + 102; // S-G: avatar thread → UI
 
+    // S15 — blur switch
+    bool m_blur = false;
+
+    // S-B — keep Start Menu visible for Dashboard preview
+    bool m_pinned = false;
+
+    // S-C — hover fade-in animation
+    int      m_hoverAnimAlpha = 255;  // 0 = transparent, 255 = full hover color
+    UINT_PTR m_hoverAnimTimer = 0;    // 0 = no animation running
+
+    // S-E — border/accent color override
+    COLORREF m_borderColor         = RGB(60, 60, 65);
+    bool     m_borderColorOverride = false;
+
+    // S-G — real user avatar loaded from Windows account picture
+    HBITMAP     m_avatarBitmap = nullptr;   // 96×96 DIB; nullptr = use initials fallback
+    std::thread m_avatarThread;             // background loader thread
 
     // ── Layout constants (Windows 7 style) ──────────────────────────────────
     static constexpr int WIDTH  = 400;   // 450 - 50 (left panel narrowed ~7 chars)
@@ -342,11 +373,16 @@ private:
     void PaintSubMenu(HDC hdc, const RECT& cr);
     void ExecuteSubMenuItem(int visualIdx);
 
+    // S-G — avatar background loading
+    void LoadAvatarAsync();
+    void DrawAvatarCircle(HDC hdc, int cx, int cy, int r);
+
     // ── Color helpers ────────────────────────────────────────────────────────
     COLORREF CalculateHoverColor();
     COLORREF CalculateSubtleColor();      // slightly lighter/darker than bg
-    COLORREF CalculateBorderColor();      // subtle border
+    COLORREF CalculateBorderColor();      // subtle border (S-E: may be overridden)
     COLORREF CalculateSelectionColor();   // keyboard-focus accent (fixed blue)
+    COLORREF AnimatedHoverColor();        // S-C: blend bg→hover using m_hoverAnimAlpha
 
     // ── Name helpers ─────────────────────────────────────────────────────────
     const wchar_t* GetMenuItemName(int index);

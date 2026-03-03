@@ -12,16 +12,45 @@
 #include <vector>
 
 #include <powrprof.h>
-#include <cwctype>   // towupper
+#include <cwctype>    // towupper
+#include <wincodec.h> // S-G: WIC for PNG avatar loading
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "powrprof.lib")
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "windowscodecs.lib") // S-G: WIC
+#pragma comment(lib, "msimg32.lib")       // S-G: AlphaBlend
 
 namespace CrystalFrame {
 
 // ── File-scope helpers ────────────────────────────────────────────────────────
+
+/// S15 — Shadow text helpers.
+/// Text on transparent / blurred backgrounds looks crisp with a 1px shadow
+/// offset (same technique used by Windows 11 desktop icon labels).
+static COLORREF ShadowColorFor(COLORREF fg) {
+    int lum = (GetRValue(fg) * 299 + GetGValue(fg) * 587 + GetBValue(fg) * 114) / 1000;
+    return lum > 128 ? RGB(0, 0, 0) : RGB(200, 200, 200);
+}
+
+// Helper simplu pentru conversie wstring la string pentru logging (rezolvă C2280)
+static std::string WStringToString(const std::wstring& wstr) {
+    if (wstr.empty()) return std::string();
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
+static void DrawShadowText(HDC hdc, const wchar_t* text, int len,
+                           RECT* rect, UINT fmt, COLORREF fg) {
+    RECT sr = { rect->left + 1, rect->top + 1, rect->right + 1, rect->bottom + 1 };
+    ::SetTextColor(hdc, ShadowColorFor(fg));
+    DrawTextW(hdc, text, len, &sr, fmt | DT_NOCLIP);
+    ::SetTextColor(hdc, fg);
+    DrawTextW(hdc, text, len, rect, fmt);
+}
 
 /// S6.2: Search the All-Programs tree (case-insensitive) for a shortcut node
 /// whose display name matches |name|. Returns its lnkPath, or empty string.
@@ -175,7 +204,10 @@ bool StartMenuWindow::Initialize() {
     // Icons paint as colored-square fallbacks until m_iconsLoaded becomes true.
     m_iconThread = std::thread(&StartMenuWindow::LoadIconsAsync, this);
 
-    CF_LOG(Info, "StartMenuWindow initialized successfully (icons loading in background)");
+    // S-G: also kick off avatar loading in background (detached — result arrives via WM_AVATAR_LOADED)
+    LoadAvatarAsync();
+
+    CF_LOG(Info, "StartMenuWindow initialized successfully (icons + avatar loading in background)");
     return true;
 }
 
@@ -199,6 +231,9 @@ void StartMenuWindow::Shutdown() {
         if (ri.hIcon) { DestroyIcon(ri.hIcon); ri.hIcon = nullptr; }
     }
     m_recentItems.clear();
+
+    // S-G — release avatar bitmap
+    if (m_avatarBitmap) { DeleteObject(m_avatarBitmap); m_avatarBitmap = nullptr; }
 
     if (m_hwnd) {
         DestroyWindow(m_hwnd);
@@ -283,6 +318,180 @@ void StartMenuWindow::LoadIconsAsync() {
     // replace the colored-square fallbacks immediately.
     if (m_hwnd)
         PostMessage(m_hwnd, WM_ICONS_LOADED, 0, 0);
+}
+
+// ── S-G: LoadAvatarAsync + DrawAvatarCircle ───────────────────────────────────
+//
+// Tries to load the Windows user account picture (PNG) via WIC on a background
+// thread. On success, m_avatarBitmap is set and WM_AVATAR_LOADED is posted so
+// the UI thread repaints. If loading fails at any step, m_avatarBitmap stays
+// nullptr and the initials fallback is used.
+//
+// Registry path (Win10/11): HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\
+//   AccountPicture → value "Image96" (96×96 JPEG/PNG path)
+void StartMenuWindow::LoadAvatarAsync() {
+    m_avatarThread = std::thread([this]() {
+        // 1. Find picture path from registry
+        wchar_t picPath[MAX_PATH] = {};
+        HKEY hKey = nullptr;
+        LSTATUS st = RegOpenKeyExW(HKEY_CURRENT_USER,
+            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AccountPicture",
+            0, KEY_READ, &hKey);
+        if (st == ERROR_SUCCESS) {
+            DWORD type = 0, sz = sizeof(picPath);
+            // Try Image96, then Image208, then Image448
+            const wchar_t* vals[] = { L"Image96", L"Image208", L"Image448" };
+            for (const wchar_t* val : vals) {
+                sz = sizeof(picPath);
+                if (RegQueryValueExW(hKey, val, nullptr, &type,
+                                     reinterpret_cast<LPBYTE>(picPath), &sz) == ERROR_SUCCESS
+                    && type == REG_SZ && picPath[0]) {
+                    break;
+                }
+                picPath[0] = L'\0';
+            }
+            RegCloseKey(hKey);
+        }
+
+        // 2. Fallback: %ProgramData%\Microsoft\User Account Pictures\{username}.png
+        if (!picPath[0]) {
+            wchar_t pd[MAX_PATH] = {};
+            if (GetEnvironmentVariableW(L"ProgramData", pd, MAX_PATH) > 0) {
+                std::wstring uname(m_username);
+                std::wstring fp = std::wstring(pd) + L"\\Microsoft\\User Account Pictures\\"
+                                  + uname + L".png";
+                DWORD attr = GetFileAttributesW(fp.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                    wcsncpy_s(picPath, fp.c_str(), MAX_PATH - 1);
+            }
+        }
+
+        if (!picPath[0]) {
+            CF_LOG(Info, "LoadAvatarAsync: no account picture found — using initials");
+            return;
+        }
+
+        // 3. Decode PNG/JPEG via WIC to a 96×96 BGRA DIB
+        IWICImagingFactory*  pFactory = nullptr;
+        IWICBitmapDecoder*   pDecoder = nullptr;
+        IWICBitmapFrameDecode* pFrame = nullptr;
+        IWICBitmapScaler*    pScaler  = nullptr;
+        IWICFormatConverter* pConv    = nullptr;
+
+        HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                      CLSCTX_INPROC_SERVER,
+                                      IID_IWICImagingFactory,
+                                      reinterpret_cast<void**>(&pFactory));
+        if (FAILED(hr)) goto cleanup;
+
+        hr = pFactory->CreateDecoderFromFilename(picPath, nullptr, GENERIC_READ,
+                                                  WICDecodeMetadataCacheOnDemand, &pDecoder);
+        if (FAILED(hr)) goto cleanup;
+
+        hr = pDecoder->GetFrame(0, &pFrame);
+        if (FAILED(hr)) goto cleanup;
+
+        hr = pFactory->CreateBitmapScaler(&pScaler);
+        if (FAILED(hr)) goto cleanup;
+
+        hr = pScaler->Initialize(pFrame, 96, 96, WICBitmapInterpolationModeFant);
+        if (FAILED(hr)) goto cleanup;
+
+        hr = pFactory->CreateFormatConverter(&pConv);
+        if (FAILED(hr)) goto cleanup;
+
+        hr = pConv->Initialize(pScaler, GUID_WICPixelFormat32bppBGRA,
+                               WICBitmapDitherTypeNone, nullptr, 0.0,
+                               WICBitmapPaletteTypeCustom);
+        if (FAILED(hr)) goto cleanup;
+
+        {
+            // 4. Copy pixels → create HBITMAP DIB
+            BITMAPINFO bmi = {};
+            bmi.bmiHeader.biSize        = sizeof(bmi.bmiHeader);
+            bmi.bmiHeader.biWidth       = 96;
+            bmi.bmiHeader.biHeight      = -96; // top-down
+            bmi.bmiHeader.biPlanes      = 1;
+            bmi.bmiHeader.biBitCount    = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+
+            void* pBits = nullptr;
+            HDC hScreen = GetDC(nullptr);
+            HBITMAP hBmp = CreateDIBSection(hScreen, &bmi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+            ReleaseDC(nullptr, hScreen);
+
+            if (hBmp && pBits) {
+                const UINT stride = 96 * 4;
+                hr = pConv->CopyPixels(nullptr, stride, stride * 96,
+                                       reinterpret_cast<BYTE*>(pBits));
+                if (SUCCEEDED(hr)) {
+                    m_avatarBitmap = hBmp;
+                    CF_LOG(Info, "LoadAvatarAsync: avatar loaded from " << WStringToString(picPath));
+                } else {
+                    DeleteObject(hBmp);
+                }
+            }
+        }
+
+    cleanup:
+        if (pConv)    pConv->Release();
+        if (pScaler)  pScaler->Release();
+        if (pFrame)   pFrame->Release();
+        if (pDecoder) pDecoder->Release();
+        if (pFactory) pFactory->Release();
+
+        if (m_hwnd)
+            PostMessage(m_hwnd, WM_AVATAR_LOADED, 0, 0);
+    });
+    m_avatarThread.detach();
+}
+
+// Draw a circular avatar at (cx, cy) with radius r.
+// Uses real account picture bitmap if loaded; otherwise draws blue circle + initial.
+void StartMenuWindow::DrawAvatarCircle(HDC hdc, int cx, int cy, int r) {
+    if (m_avatarBitmap) {
+        // Clip drawing to ellipse, then StretchBlt the 96×96 bitmap into the circle.
+        HRGN clipRgn = CreateEllipticRgn(cx - r, cy - r, cx + r, cy + r);
+        int savedDC  = SaveDC(hdc);
+        SelectClipRgn(hdc, clipRgn);
+
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, m_avatarBitmap);
+        StretchBlt(hdc, cx - r, cy - r, r * 2, r * 2,
+                   memDC, 0, 0, 96, 96, SRCCOPY);
+        SelectObject(memDC, oldBmp);
+        DeleteDC(memDC);
+
+        RestoreDC(hdc, savedDC);
+        DeleteObject(clipRgn);
+    } else {
+        // Fallback: solid blue circle with initial letter
+        HBRUSH avBr  = CreateSolidBrush(RGB(0, 103, 192));
+        HPEN   noPen = (HPEN)GetStockObject(NULL_PEN);
+        HBRUSH ob    = (HBRUSH)SelectObject(hdc, avBr);
+        HPEN   op    = (HPEN)SelectObject(hdc, noPen);
+        Ellipse(hdc, cx - r, cy - r, cx + r, cy + r);
+        SelectObject(hdc, ob);
+        SelectObject(hdc, op);
+        DeleteObject(avBr);
+
+        // Initial letter
+        int fontSize = max(10, r - 2);
+        HFONT f = CreateFontW(fontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        HFONT oldF = (HFONT)SelectObject(hdc, f);
+        ::SetTextColor(hdc, RGB(255, 255, 255));
+        SetBkMode(hdc, TRANSPARENT);
+        wchar_t init[2] = { 
+        m_username[0] ? static_cast<wchar_t>(towupper(m_username[0])) : L'U', 
+        0 
+    };
+        RECT tr = { cx - r, cy - r, cx + r, cy + r };
+        DrawTextW(hdc, init, 1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(hdc, oldF);
+        DeleteObject(f);
+    }
 }
 
 // ── Window creation ──────────────────────────────────────────────────────────
@@ -388,6 +597,10 @@ void StartMenuWindow::Show(int x, int y) {
 }
 
 void StartMenuWindow::Hide() {
+    // S-B: when pinned for Dashboard preview, ignore all hide requests.
+    // Use ForceHide() to bypass this guard.
+    if (m_pinned) return;
+
     if (m_hwnd && m_visible) {
         ShowWindow(m_hwnd, SW_HIDE);
         m_visible          = false;
@@ -405,6 +618,8 @@ void StartMenuWindow::Hide() {
         m_keySelApIndex     = -1;
         m_apScrollOffset    = 0;
         if (m_hoverTimer) { KillTimer(m_hwnd, HOVER_TIMER_ID); m_hoverTimer = 0; }
+        if (m_hoverAnimTimer) { KillTimer(m_hwnd, HOVER_ANIM_TIMER_ID); m_hoverAnimTimer = 0; }
+        m_hoverAnimAlpha    = 255;
         m_hoverCandidate    = -1;
         m_subMenuOpen       = false;
         m_subMenuNodeIdx    = -1;
@@ -468,7 +683,9 @@ void StartMenuWindow::ApplyTransparency() {
     BYTE alpha = static_cast<BYTE>(((100 - m_opacity) * 255) / 100);
 
     ACCENT_POLICY accent    = {};
-    accent.AccentState      = ACCENT_ENABLE_TRANSPARENTGRADIENT;
+    // S15 blur fix: use acrylic when m_blur is on, transparent gradient otherwise.
+    accent.AccentState      = m_blur ? ACCENT_ENABLE_ACRYLICBLURBEHIND
+                                     : ACCENT_ENABLE_TRANSPARENTGRADIENT;
     accent.AccentFlags      = 2;
     accent.GradientColor    = (static_cast<DWORD>(alpha) << 24)
                             | (static_cast<DWORD>(GetBValue(m_bgColor)) << 16)
@@ -507,6 +724,8 @@ COLORREF StartMenuWindow::CalculateSubtleColor() {
 }
 
 COLORREF StartMenuWindow::CalculateBorderColor() {
+    // S-E: if an explicit border color was set from Dashboard, use it directly.
+    if (m_borderColorOverride) return m_borderColor;
     int r   = GetRValue(m_bgColor);
     int g   = GetGValue(m_bgColor);
     int b   = GetBValue(m_bgColor);
@@ -520,6 +739,48 @@ COLORREF StartMenuWindow::CalculateBorderColor() {
 // Blue accent used for keyboard-focus highlight (distinct from mouse-hover gray)
 COLORREF StartMenuWindow::CalculateSelectionColor() {
     return RGB(0, 96, 180);
+}
+
+// S-C — interpolate between bg color and hover color based on animation alpha (0-255)
+COLORREF StartMenuWindow::AnimatedHoverColor() {
+    if (m_hoverAnimAlpha >= 255) return CalculateHoverColor();
+    COLORREF hc = CalculateHoverColor();
+    int alpha   = m_hoverAnimAlpha;
+    int r = GetRValue(m_bgColor) + (GetRValue(hc) - GetRValue(m_bgColor)) * alpha / 255;
+    int g = GetGValue(m_bgColor) + (GetGValue(hc) - GetGValue(m_bgColor)) * alpha / 255;
+    int b = GetBValue(m_bgColor) + (GetBValue(hc) - GetBValue(m_bgColor)) * alpha / 255;
+    return RGB(max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)));
+}
+
+// ── S15 — SetBlur ─────────────────────────────────────────────────────────────
+void StartMenuWindow::SetBlur(bool useBlur) {
+    m_blur = useBlur;
+    if (m_visible) ApplyTransparency();
+}
+
+// ── S-B — SetPinned / ForceHide ──────────────────────────────────────────────
+void StartMenuWindow::SetPinned(bool pinned) {
+    m_pinned = pinned;
+    if (pinned && !m_visible) {
+        Show(0, 0);
+    } else if (!pinned) {
+        ForceHide();
+    }
+}
+
+void StartMenuWindow::ForceHide() {
+    bool savedPinned = m_pinned;
+    m_pinned = false;
+    Hide();
+    // Don't restore m_pinned: ForceHide is always an unconditional hide.
+    (void)savedPinned;
+}
+
+// ── S-E — SetBorderColor ──────────────────────────────────────────────────────
+void StartMenuWindow::SetBorderColor(COLORREF color) {
+    m_borderColor         = color;
+    m_borderColorOverride = true;
+    if (m_visible) InvalidateRect(m_hwnd, NULL, FALSE);
 }
 
 // ── DrawIconSquare ────────────────────────────────────────────────────────────
@@ -543,7 +804,7 @@ void StartMenuWindow::DrawIconSquare(HDC hdc, int cx, int cy, int sz,
         HFONT font = CreateFontW(
             11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         HFONT oldFont = (HFONT)SelectObject(hdc, font);
         ::SetTextColor(hdc, textColor);
         SetBkMode(hdc, TRANSPARENT);
@@ -780,17 +1041,17 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
 
     HFONT nameFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, nameFont);
 
     for (int i = 0; i < PROG_COUNT; ++i) {
         int itemY = PROG_Y + i * PROG_ITEM_H;
 
-        // Hover / keyboard-selection highlight (mutually exclusive visually)
+        // Hover / keyboard-selection highlight — S-C uses AnimatedHoverColor()
         bool isKeySel = (i == m_keySelProgIndex);
         bool isHover  = (i == m_hoveredProgIndex) && !isKeySel;
         if (isKeySel || isHover) {
-            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : CalculateHoverColor();
+            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : AnimatedHoverColor();
             HBRUSH hBr  = CreateSolidBrush(hlColor);
             HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
             HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
@@ -813,12 +1074,11 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
                            s_pinnedItems[i].iconColor, s_pinnedItems[i].shortName);
         }
 
-        // App name
-        ::SetTextColor(hdc, m_textColor);
+        // App name (S15: shadow text)
         RECT nr = { MARGIN + PROG_ICON_SZ + 12, itemY,
                     DIVIDER_X - MARGIN,          itemY + PROG_ITEM_H };
-        DrawTextW(hdc, s_pinnedItems[i].name, -1, &nr,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawShadowText(hdc, s_pinnedItems[i].name, -1, &nr,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
     }
 
     // ── S7: Recently used programs — below pinned items ──────────────────────
@@ -836,7 +1096,7 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
         bool isKeySel = (itemIdx == m_keySelProgIndex);
         bool isHover  = (itemIdx == m_hoveredProgIndex) && !isKeySel;
         if (isKeySel || isHover) {
-            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : CalculateHoverColor();
+            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : AnimatedHoverColor();
             HBRUSH hBr  = CreateSolidBrush(hlColor);
             HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
             HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
@@ -864,14 +1124,12 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
                            RGB(90, 90, 90), fb.c_str());
         }
 
-        // Name (slightly dimmed to distinguish from pinned — Win7 uses same color,
-        // but we keep it consistent with m_textColor)
-        ::SetTextColor(hdc, m_textColor);
+        // Name (S15: shadow text)
         RECT nr = { MARGIN + PROG_ICON_SZ + 12, itemY,
                     DIVIDER_X - MARGIN,          itemY + PROG_ITEM_H };
         SelectObject(hdc, nameFont);
-        DrawTextW(hdc, m_recentItems[i].name.c_str(), -1, &nr,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawShadowText(hdc, m_recentItems[i].name.c_str(), -1, &nr,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
     }
 
     SelectObject(hdc, oldF);
@@ -904,10 +1162,10 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
 
     HFONT nameFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT boldFont = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, nameFont);
 
     for (int i = 0; i < count; ++i) {
@@ -915,11 +1173,11 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
         const MenuNode& node    = nodes[static_cast<size_t>(nodeIdx)];
         int             itemY   = PROG_Y + i * PROG_ITEM_H;
 
-        // Hover / keyboard-selection highlight (both use absolute nodeIdx).
+        // Hover / keyboard-selection highlight — S-C animated hover
         bool isKeySel = (nodeIdx == m_keySelApIndex);
         bool isHover  = (nodeIdx == m_hoveredApIndex) && !isKeySel;
         if (isKeySel || isHover) {
-            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : CalculateHoverColor();
+            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : AnimatedHoverColor();
             HBRUSH hBr  = CreateSolidBrush(hlColor);
             HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
             HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
@@ -951,11 +1209,10 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
             SelectObject(hdc, nameFont);
         }
 
-        ::SetTextColor(hdc, m_textColor);
         RECT nr = { MARGIN + PROG_ICON_SZ + 12, itemY,
                     DIVIDER_X - MARGIN,          itemY + PROG_ITEM_H };
-        DrawTextW(hdc, node.name.c_str(), -1, &nr,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawShadowText(hdc, node.name.c_str(), -1, &nr,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
     }
 
     // "▲ scroll…" accent when items exist above the visible window.
@@ -993,12 +1250,12 @@ void StartMenuWindow::PaintApRow(HDC hdc, const RECT& cr) {
     // Thin rule above the row
     DrawSeparator(hdc, AP_ROW_Y - 1, MARGIN, DIVIDER_X - MARGIN);
 
-    // Hover / keyboard-selection highlight
+    // Hover / keyboard-selection highlight — S-C animated
     {
         bool isKeySel = m_keySelApRow;
         bool isHover  = m_hoveredApRow && !isKeySel;
         if (isKeySel || isHover) {
-            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : CalculateHoverColor();
+            COLORREF hlColor = isKeySel ? CalculateSelectionColor() : AnimatedHoverColor();
             HBRUSH hBr  = CreateSolidBrush(hlColor);
             HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
             HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
@@ -1013,7 +1270,7 @@ void StartMenuWindow::PaintApRow(HDC hdc, const RECT& cr) {
 
     HFONT rowFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, rowFont);
     ::SetTextColor(hdc, m_textColor);
     SetBkMode(hdc, TRANSPARENT);
@@ -1023,7 +1280,7 @@ void StartMenuWindow::PaintApRow(HDC hdc, const RECT& cr) {
                            : L"All Programs  \u203a";
 
     RECT tr = { MARGIN + 6, AP_ROW_Y, DIVIDER_X - MARGIN, AP_ROW_Y + AP_ROW_H };
-    DrawTextW(hdc, label, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawShadowText(hdc, label, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE, m_textColor);
 
     SelectObject(hdc, oldF);
     DeleteObject(rowFont);
@@ -1064,7 +1321,7 @@ void StartMenuWindow::PaintWin7SearchBox(HDC hdc, const RECT& cr) {
     // Placeholder text
     HFONT ph = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, ph);
     ::SetTextColor(hdc, RGB(135, 135, 145));
     SetBkMode(hdc, TRANSPARENT);
@@ -1102,34 +1359,23 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
     int avCX = RC_X + avR + 4;
     int avCY = RC_HDR_H / 2;
 
-    // Avatar circle
-    HBRUSH avBr  = CreateSolidBrush(RGB(0, 103, 192));
-    HPEN   noPen = (HPEN)GetStockObject(NULL_PEN);
-    HBRUSH ob    = (HBRUSH)SelectObject(hdc, avBr);
-    HPEN   op    = (HPEN)SelectObject(hdc, noPen);
-    Ellipse(hdc, avCX - avR, avCY - avR, avCX + avR, avCY + avR);
-    SelectObject(hdc, ob);
-    SelectObject(hdc, op);
-    DeleteObject(avBr);
+    // S-G: real avatar if loaded, otherwise initials fallback
+    DrawAvatarCircle(hdc, avCX, avCY, avR);
 
-    // Initial inside circle
-    wchar_t initial[2] = { m_username[0] ? towupper(m_username[0]) : L'U', 0 };
+    // Dummy font for SelectObject chain (initF still needed for HFONT oldF)
     HFONT initF = CreateFontW(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, initF);
-    ::SetTextColor(hdc, RGB(255, 255, 255));
-    RECT avTR = { avCX - avR, avCY - avR, avCX + avR, avCY + avR };
-    DrawTextW(hdc, initial, 1, &avTR, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-    // Username text
+    // Username text (S15: shadow text)
     HFONT nmF = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     SelectObject(hdc, nmF);
-    ::SetTextColor(hdc, m_textColor);
     RECT nmR = { avCX + avR + 8, 0, cr.right - 8, RC_HDR_H };
-    DrawTextW(hdc, m_username, -1, &nmR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawShadowText(hdc, m_username, -1, &nmR,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
 
     // Thin separator below header
     DrawSeparator(hdc, RC_HDR_H, DIVIDER_X + 8, cr.right - 8);
@@ -1137,7 +1383,7 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
     // ── Shell link items ─────────────────────────────────────────────────────
     HFONT itemF = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     SelectObject(hdc, itemF);
 
     int y = RC_HDR_H + 2;
@@ -1149,9 +1395,10 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
             DrawSeparator(hdc, y + RC_SEP_H / 2, RC_X + 4, cr.right - 8);
             y += RC_SEP_H;
         } else {
-            // Hover highlight
+            // Hover highlight — S-C animated, S-D inner top glow
             if (i == m_hoveredRightIndex) {
-                HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+                COLORREF hc = AnimatedHoverColor();
+                HBRUSH hBr  = CreateSolidBrush(hc);
                 HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
                 HBRUSH hOb  = (HBRUSH)SelectObject(hdc, hBr);
                 HPEN   hOp  = (HPEN)SelectObject(hdc, noPn);
@@ -1159,6 +1406,19 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
                 SelectObject(hdc, hOb);
                 SelectObject(hdc, hOp);
                 DeleteObject(hBr);
+                // S-D glow: 1px lighter line at top of hover rect (Win7 glass effect)
+                if (m_hoverAnimAlpha > 60) {
+                    COLORREF glowC = RGB(
+                        min(255, GetRValue(hc) + 60),
+                        min(255, GetGValue(hc) + 60),
+                        min(255, GetBValue(hc) + 60));
+                    HPEN glowPen = CreatePen(PS_SOLID, 1, glowC);
+                    HPEN ogp = (HPEN)SelectObject(hdc, glowPen);
+                    MoveToEx(hdc, RC_X + 4, y + 2, NULL);
+                    LineTo(hdc, cr.right - 8, y + 2);
+                    SelectObject(hdc, ogp);
+                    DeleteObject(glowPen);
+                }
             }
 
             // Item icon (16×16) — drawn at left edge of item row
@@ -1168,11 +1428,10 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
                 DrawIconEx(hdc, iconX, iconY, m_rightIcons[i], 16, 16, 0, nullptr, DI_NORMAL);
             }
 
-            // Item label — always indented by 24 px to leave room for the icon slot
-            ::SetTextColor(hdc, m_textColor);
+            // Item label — S15 shadow text
             RECT tr = { RC_X + 24, y, cr.right - 8, y + RC_ITEM_H };
-            DrawTextW(hdc, item.label, -1, &tr,
-                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            DrawShadowText(hdc, item.label, -1, &tr,
+                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
 
             y += RC_ITEM_H;
         }
@@ -1198,34 +1457,23 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
 
     int barCY = BOTTOM_BAR_Y + BOTTOM_BAR_H / 2;
 
-    // ── Avatar circle (left side) ──
+    // ── Avatar circle (left side) — S-G: real avatar or initials fallback ──
     int avCX = MARGIN + 14, avR = 13;
-    HBRUSH avBr  = CreateSolidBrush(RGB(0, 103, 192));
-    HPEN   noPen = (HPEN)GetStockObject(NULL_PEN);
-    HBRUSH oldBr = (HBRUSH)SelectObject(hdc, avBr);
-    HPEN   oldPn = (HPEN)SelectObject(hdc, noPen);
-    Ellipse(hdc, avCX - avR, barCY - avR, avCX + avR, barCY + avR);
-    SelectObject(hdc, oldBr);
-    SelectObject(hdc, oldPn);
-    DeleteObject(avBr);
+    DrawAvatarCircle(hdc, avCX, barCY, avR);
 
     HFONT initF = CreateFontW(12, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, initF);
-    ::SetTextColor(hdc, RGB(255, 255, 255));
-    wchar_t initial[2] = { m_username[0] ? towupper(m_username[0]) : L'U', 0 };
-    RECT avTR = { avCX - avR, barCY - avR, avCX + avR, barCY + avR };
-    DrawTextW(hdc, initial, 1, &avTR, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-    // ── "User" label ──
+    // ── "User" label (S15: shadow text) ──
     HFONT nmF = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     SelectObject(hdc, nmF);
-    ::SetTextColor(hdc, m_textColor);
     RECT nmR = { avCX + avR + 6, BOTTOM_BAR_Y, DIVIDER_X - MARGIN, cr.bottom };
-    DrawTextW(hdc, m_username, -1, &nmR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawShadowText(hdc, m_username, -1, &nmR,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
 
     // ── Win7 "Shut down" button + arrow (right side) ────────────────────────
     // Layout (right-aligned): [MARGIN][Shut down SHUT_BTN_W][1px gap][arrow SHUT_ARROW_W][MARGIN]
@@ -1259,7 +1507,7 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
         // Text
         HFONT  sdF = CreateFontW(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         HFONT  oldSdF = (HFONT)SelectObject(hdc, sdF);
         ::SetTextColor(hdc, RGB(10, 10, 10));
         RECT  tr = { sdL, btnTop, sdR, btnBot };
@@ -1285,7 +1533,7 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
         // Arrow glyph (▼) centred
         HFONT  arF = CreateFontW(10, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Marlett");
+            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Marlett");
         HFONT  oldArF = (HFONT)SelectObject(hdc, arF);
         ::SetTextColor(hdc, RGB(10, 10, 10));
         RECT  tr = { arrL, btnTop, arrR, btnBot };
@@ -1674,7 +1922,7 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
     // Title — folder name
     HFONT titleF = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT oldF = (HFONT)SelectObject(hdc, titleF);
     ::SetTextColor(hdc, m_textColor);
     RECT tr = { SM_X, 0, cr.right - 4, SM_TITLE_H };
@@ -1685,17 +1933,17 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
     // Items
     HFONT itemF = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     HFONT boldF = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
     for (int i = 0; i < count; ++i) {
         const MenuNode& child = folder.children[static_cast<size_t>(i)];
         int itemY = SM_TITLE_H + i * SM_ITEM_H;
 
         if (i == m_subMenuHoveredIdx) {
-            HBRUSH hBr  = CreateSolidBrush(CalculateHoverColor());
+            HBRUSH hBr  = CreateSolidBrush(AnimatedHoverColor());
             HPEN   noPn = (HPEN)GetStockObject(NULL_PEN);
             HBRUSH ob   = (HBRUSH)SelectObject(hdc, hBr);
             HPEN   op   = (HPEN)SelectObject(hdc, noPn);
@@ -1721,10 +1969,9 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
             SelectObject(hdc, itemF);
         }
 
-        ::SetTextColor(hdc, m_textColor);
         RECT nr = { SM_X + 32, itemY, cr.right - 4, itemY + SM_ITEM_H };
-        DrawTextW(hdc, child.name.c_str(), -1, &nr,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawShadowText(hdc, child.name.c_str(), -1, &nr,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
     }
 
     if (count == 0) {
@@ -1860,6 +2107,11 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         InvalidateRect(m_hwnd, nullptr, FALSE);
         return 0;
 
+    case WM_AVATAR_LOADED:
+        // S-G: posted by avatar thread when bitmap is ready — trigger repaint.
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return 0;
+
     case WM_MOUSEMOVE: {
         if (!m_trackingMouse) {
             TRACKMOUSEEVENT tme = {};
@@ -1950,6 +2202,24 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             nshut  != m_hoveredShutdown   ||
             narrow != m_hoveredArrow      ||
             hadKeySel) {
+
+            // S-C: entering a new hover target — restart fade-in animation
+            bool anyNewHover = (nProg >= 0 || nApRow || nAp >= 0 || nrc >= 0);
+            bool hadHover    = (m_hoveredProgIndex >= 0 || m_hoveredApRow ||
+                                m_hoveredApIndex >= 0 || m_hoveredRightIndex >= 0);
+            if (anyNewHover && nProg  != m_hoveredProgIndex ||
+                               nApRow != m_hoveredApRow     ||
+                               nAp    != m_hoveredApIndex   ||
+                               nrc    != m_hoveredRightIndex) {
+                m_hoverAnimAlpha = 0;
+                if (!m_hoverAnimTimer)
+                    m_hoverAnimTimer = SetTimer(m_hwnd, HOVER_ANIM_TIMER_ID, 10, NULL);
+            } else if (!anyNewHover && hadHover) {
+                // Moved to a non-hoverable area — stop animation, show full
+                if (m_hoverAnimTimer) { KillTimer(m_hwnd, HOVER_ANIM_TIMER_ID); m_hoverAnimTimer = 0; }
+                m_hoverAnimAlpha = 255;
+            }
+
             m_hoveredProgIndex  = nProg;
             m_hoveredApRow      = nApRow;
             m_hoveredApIndex    = nAp;
@@ -1967,6 +2237,9 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 
     case WM_MOUSELEAVE:
+        // S-C: stop animation on mouse leave
+        if (m_hoverAnimTimer) { KillTimer(m_hwnd, HOVER_ANIM_TIMER_ID); m_hoverAnimTimer = 0; }
+        m_hoverAnimAlpha    = 255;
         m_trackingMouse     = false;
         m_hoveredProgIndex  = -1;
         m_hoveredApRow      = false;
@@ -2152,6 +2425,15 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             if (m_hoverCandidate >= 0 && m_viewMode == LeftViewMode::AllPrograms)
                 OpenSubMenu(m_hoverCandidate);
             m_hoverCandidate = -1;
+        } else if (wParam == HOVER_ANIM_TIMER_ID) {
+            // S-C: advance hover fade-in animation (+50 per 10ms tick ≈ 5 ticks = 50ms)
+            m_hoverAnimAlpha += 50;
+            if (m_hoverAnimAlpha >= 255) {
+                m_hoverAnimAlpha = 255;
+                KillTimer(m_hwnd, HOVER_ANIM_TIMER_ID);
+                m_hoverAnimTimer = 0;
+            }
+            InvalidateRect(m_hwnd, NULL, FALSE);
         }
         return 0;
 

@@ -148,10 +148,17 @@ namespace CrystalFrame.Dashboard
                 StartShowVideos.IsChecked        = _viewModel.StartShowVideos;
                 StartShowRecentFiles.IsChecked   = _viewModel.StartShowRecentFiles;
 
+                StartBorderColorRSlider.Value = _viewModel.StartBorderColorR;
+                StartBorderColorGSlider.Value = _viewModel.StartBorderColorG;
+                StartBorderColorBSlider.Value = _viewModel.StartBorderColorB;
+
+                StartMenuPinnedToggle.IsOn = _viewModel.StartMenuPinned;
+
                 UpdateOpacityText();
                 UpdateTaskbarColorPreview();
                 UpdateStartBgColorPreview();
                 UpdateStartTextColorPreview();
+                UpdateStartBorderColorPreview();
                 UpdateStatus();
 
                 _isInitialized = true;
@@ -218,6 +225,14 @@ namespace CrystalFrame.Dashboard
                 (byte)(int)StartTextColorRSlider.Value,
                 (byte)(int)StartTextColorGSlider.Value,
                 (byte)(int)StartTextColorBSlider.Value));
+        }
+
+        private void UpdateStartBorderColorPreview()
+        {
+            StartBorderColorPreview.Background = new SolidColorBrush(Color.FromArgb(255,
+                (byte)(int)StartBorderColorRSlider.Value,
+                (byte)(int)StartBorderColorGSlider.Value,
+                (byte)(int)StartBorderColorBSlider.Value));
         }
 
         // ── Toggle handlers ───────────────────────────────────────────────────────
@@ -377,6 +392,94 @@ namespace CrystalFrame.Dashboard
             {
                 _viewModel.OnStartMenuItemChanged(itemName, isChecked);
                 Debug.WriteLine($"[StartMenuItem] {itemName} = {isChecked}");
+            }
+        }
+
+        // ── S-B: Keep Start Menu Open toggle ─────────────────────────────────────
+
+        private void StartMenuPinned_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (!_isInitialized) return;
+            _viewModel.OnStartMenuPinnedChanged(StartMenuPinnedToggle.IsOn);
+        }
+
+        // ── S-E: Border color sliders ─────────────────────────────────────────────
+
+        private void StartBorderColorR_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            int value = (int)e.NewValue;
+            StartBorderColorRValue.Text = value.ToString();
+            if (!_isInitialized) return;
+            UpdateStartBorderColorPreview();
+            _viewModel.OnStartBorderColorChanged(value, (int)StartBorderColorGSlider.Value, (int)StartBorderColorBSlider.Value);
+        }
+
+        private void StartBorderColorG_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            int value = (int)e.NewValue;
+            StartBorderColorGValue.Text = value.ToString();
+            if (!_isInitialized) return;
+            UpdateStartBorderColorPreview();
+            _viewModel.OnStartBorderColorChanged((int)StartBorderColorRSlider.Value, value, (int)StartBorderColorBSlider.Value);
+        }
+
+        private void StartBorderColorB_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            int value = (int)e.NewValue;
+            StartBorderColorBValue.Text = value.ToString();
+            if (!_isInitialized) return;
+            UpdateStartBorderColorPreview();
+            _viewModel.OnStartBorderColorChanged((int)StartBorderColorRSlider.Value, (int)StartBorderColorGSlider.Value, value);
+        }
+
+        // ── S-F: Theme preset buttons ─────────────────────────────────────────────
+
+        private void PresetClassicWin7_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_isInitialized) return;
+            _viewModel.ApplyPreset("ClassicWin7");
+            SyncSlidersFromViewModel();
+        }
+
+        private void PresetAeroGlass_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_isInitialized) return;
+            _viewModel.ApplyPreset("AeroGlass");
+            SyncSlidersFromViewModel();
+        }
+
+        private void PresetDark_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_isInitialized) return;
+            _viewModel.ApplyPreset("Dark");
+            SyncSlidersFromViewModel();
+        }
+
+        /// Sync all slider values from viewmodel after a preset was applied.
+        private void SyncSlidersFromViewModel()
+        {
+            _isInitialized = false;
+            try
+            {
+                StartOpacitySlider.Value     = _viewModel.StartOpacity;
+                StartBlurToggle.IsOn         = _viewModel.StartBlur;
+                StartBgColorRSlider.Value    = _viewModel.StartBgColorR;
+                StartBgColorGSlider.Value    = _viewModel.StartBgColorG;
+                StartBgColorBSlider.Value    = _viewModel.StartBgColorB;
+                StartTextColorRSlider.Value  = _viewModel.StartTextColorR;
+                StartTextColorGSlider.Value  = _viewModel.StartTextColorG;
+                StartTextColorBSlider.Value  = _viewModel.StartTextColorB;
+                StartBorderColorRSlider.Value = _viewModel.StartBorderColorR;
+                StartBorderColorGSlider.Value = _viewModel.StartBorderColorG;
+                StartBorderColorBSlider.Value = _viewModel.StartBorderColorB;
+                UpdateOpacityText();
+                UpdateStartBgColorPreview();
+                UpdateStartTextColorPreview();
+                UpdateStartBorderColorPreview();
+            }
+            finally
+            {
+                _isInitialized = true;
             }
         }
     }

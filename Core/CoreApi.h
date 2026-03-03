@@ -68,6 +68,12 @@ CRYSTALFRAME_API void CoreSetStartMenuTextColor(unsigned int rgb);
 CRYSTALFRAME_API void CoreSetStartMenuItems(bool controlPanel, bool deviceManager, bool installedApps,
                                              bool documents, bool pictures, bool videos, bool recentFiles);
 
+// S-B: Pin Start Menu open for Dashboard preview (true=pinned/visible, false=unpin+hide)
+CRYSTALFRAME_API void CoreSetStartMenuPinned(bool pinned);
+
+// S-E: Set explicit border/accent color (RGB as DWORD, 0x00RRGGBB)
+CRYSTALFRAME_API void CoreSetStartMenuBorderColor(unsigned int rgb);
+
 // Get current status
 CRYSTALFRAME_API void CoreGetStatus(CoreStatus* status);
 

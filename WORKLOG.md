@@ -1,6 +1,6 @@
 
 # WORKLOG — Win7-Revival / CrystalFrame
-Last updated: 2026-03-03 (session 15 — fix Start Menu flickering — double buffering + WM_ERASEBKGND)
+Last updated: 2026-03-03 (session 16 — blur fix + text quality + hover animation + avatar + border color + theme presets + keep-open toggle + submenu delay 50ms + right-column glow)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -110,6 +110,82 @@ New requirement (non-negotiable, §10):
 2. Rebuild `CrystalFrame.Core.dll` cu CMake (pentru static CRT + crash handler activ).
 3. Test publish → verifică că `%LOCALAPPDATA%\CrystalFrame\CrystalFrame.log` apare la prima pornire.
 4. ✅ S6 implementat în această sesiune — iconițe reale din sistem (detalii în Session 9 S6 note de mai jos).
+
+---
+
+### Session 16 — Blur fix + text quality + UX sprint (2026-03-03)
+
+**Branch:** `claude/update-worklog-MUEFZ`
+
+**Funcționalități implementate în această sesiune:**
+
+#### S15 — Blur switch funcțional + text ANTIALIASED + shadow
+- **Defect A fix:** `ApplyTransparency()` acum folosește `ACCENT_ENABLE_ACRYLICBLURBEHIND` când `m_blur=true`; anterior era mereu `TRANSPARENTGRADIENT`.
+- **Defect B fix:** `Core::SetStartBlur()` acum apelează și `m_startMenuWindow->SetBlur(enabled)` (anterior trimitea efectul doar pe HWND-ul native Windows Start Menu, nu pe fereastra custom).
+- **Text quality:** toate `CreateFontW` au `CLEARTYPE_QUALITY` → `ANTIALIASED_QUALITY` (15 apeluri) — text neted pe orice fundal transparent/blur.
+- **Text shadow:** helper `DrawShadowText()` adăugat + aplicat pe toate textele vizibile (pinned apps, recent apps, All Programs, right column items, username, submenu title + items).
+
+#### S-A — Submenu hover delay 400ms → 50ms
+- `HOVER_DELAY_MS` scăzut de la 400ms la 50ms. Submeniurile din All Programs se deschid aproape instantaneu la hover — feel mult mai responsiv.
+
+#### S-B — Keep Start Menu Open (preview toggle)
+- Toggle nou în Dashboard → Start Menu Settings: **"Keep Start Menu Open"**.
+- Când e activ: `StartMenuWindow::Hide()` ignoră cererile de ascundere (click extern, Windows key etc.) — Start Menu rămâne vizibil pentru preview în timp real al sliderelor de efecte.
+- `ForceHide()` adăugat pentru ascundere explicită (dezactivare toggle, închidere app).
+- API: `CoreSetStartMenuPinned(bool)` → `Core::SetStartMenuPinned()` → `StartMenuWindow::SetPinned()`.
+
+#### S-C — Hover cu tranziție animată (80ms fade-in)
+- `m_hoverAnimAlpha` (0–255) + `HOVER_ANIM_TIMER_ID` (10ms ticks, +50/tick = ~5 ticks ≈ 50ms).
+- La fiecare schimbare de hover index, alpha se resetează la 0 și crește gradual spre 255.
+- `AnimatedHoverColor()` interpolează `bgColor → hoverColor` pe baza alpha-ului curent.
+- Toate zonele hover (pinned, recent, AP, right column) folosesc culoarea animată.
+
+#### S-D — Glow inner highlight pe coloana dreaptă
+- Deasupra rect-ului de hover pe itemele din coloana dreaptă se desenează o linie de 1px mai luminoasă (`hoverColor + 60` lum) — efect de "glass top" similar Win7 Aero.
+
+#### S-E — Culoare border/accent separabilă
+- `m_borderColor` + `m_borderColorOverride` în `StartMenuWindow` — când override e activ, `CalculateBorderColor()` returnează culoarea explicit setată (nu mai calculat din bg).
+- API: `CoreSetStartMenuBorderColor(uint rgb)` → `Core::SetStartMenuBorderColor()` → `StartMenuWindow::SetBorderColor()`.
+- Dashboard: secțiune nouă **"Border Color"** cu slidere R/G/B + preview swatch.
+- Persistat în `config.json` (câmpuri `StartBorderColorR/G/B`).
+
+#### S-F — Preset-uri de temă (3 one-click presets)
+- 3 butoane în Dashboard → Start Menu: **Classic Win7**, **Aero Glass**, **Dark**.
+  - Classic Win7: BG `(20, 60, 120)`, text alb, border `(80, 130, 190)`, opacitate 85%, blur OFF.
+  - Aero Glass: BG `(20, 40, 80)`, text alb, border `(60, 100, 160)`, opacitate 55%, blur ON.
+  - Dark: BG `(18, 18, 22)`, text `(200, 200, 200)`, border `(60, 60, 65)`, opacitate 90%, blur OFF.
+- Fiecare preset setează simultan: bg color, text color, border color, opacity, blur.
+
+#### S-G — Avatar real din contul Windows
+- `LoadAvatarAsync()` rulează pe thread separat, încearcă:
+  1. Registry: `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\AccountPicture` → `Image96`.
+  2. Fallback: `%ProgramData%\Microsoft\User Account Pictures\{username}.png`.
+- Decode PNG via WIC (`IWICImagingFactory`) → HBITMAP DIB 32-bit BGRA.
+- `DrawAvatarCircle()` renderează bitmap-ul decupat circular (`CreateEllipticRgn` + `SelectClipRgn` + `StretchBlt`).
+- Dacă avatarul nu e găsit, fallback existent (cerc albastru cu inițiala).
+- `WM_AVATAR_LOADED = WM_USER + 102` notifică UI thread-ul să repaint.
+
+#### S-H — Power submenu complet
+- Deja implementat în sesiunile anterioare (sesiunea 9). Confirmat funcțional:
+  - Switch User → `LockWorkStation()` (afișează lock screen + opțiune Switch user)
+  - Log Off → `ExitWindowsEx(EWX_LOGOFF)`
+  - Lock → `LockWorkStation()`
+  - Restart → `ExitWindowsEx(EWX_REBOOT)`
+  - Sleep → `SetSuspendState(FALSE, ...)`
+  - Hibernate → `SetSuspendState(TRUE, ...)`
+  - Shut down → `ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF)`
+
+**Fișiere modificate:**
+- `Core/StartMenuWindow.h` — noi câmpuri, metode, constante
+- `Core/StartMenuWindow.cpp` — blur, shadow text, hover anim, glow, avatar, border override
+- `Core/Core.h/.cpp` — `SetStartMenuPinned()`, `SetStartMenuBorderColor()`, blur forward
+- `Core/CoreApi.h/.cpp` — `CoreSetStartMenuPinned()`, `CoreSetStartMenuBorderColor()`
+- `Dashboard/CoreNative.cs` — P/Invoke declarations
+- `Dashboard/CoreManager.cs` — wrapper methods
+- `Dashboard/ConfigManager.cs` — `StartBorderColorR/G/B`
+- `Dashboard/MainViewModel.cs` — `StartBorderColorR/G/B`, `StartMenuPinned`, `ApplyPreset()`
+- `Dashboard/DetailWindow.xaml` — toggle keep-open, border sliders, preset buttons
+- `Dashboard/DetailWindow.xaml.cs` — event handlers
 
 ---
 

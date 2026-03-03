@@ -39,6 +39,11 @@ namespace CrystalFrame.Dashboard
         public bool StartShowPlaceholder3 { get; set; } = false;
         public bool StartShowPlaceholder4 { get; set; } = false;
         public bool StartShowPlaceholder5 { get; set; } = false;
+        // Start Menu Border/Accent Color (S-E)
+        public int StartBorderColorR { get; set; } = 60;
+        public int StartBorderColorG { get; set; } = 60;
+        public int StartBorderColorB { get; set; } = 65;
+
         public bool TaskbarBlur { get; set; } = false;
         public bool StartBlur { get; set; } = false;
         // True until the first successful launch completes — triggers safe-mode defaults.
@@ -164,6 +169,9 @@ namespace CrystalFrame.Dashboard
         public bool StartShowPlaceholder3 { get => _config.StartShowPlaceholder3; set { _config.StartShowPlaceholder3 = value; _ = SaveAsync(); } }
         public bool StartShowPlaceholder4 { get => _config.StartShowPlaceholder4; set { _config.StartShowPlaceholder4 = value; _ = SaveAsync(); } }
         public bool StartShowPlaceholder5 { get => _config.StartShowPlaceholder5; set { _config.StartShowPlaceholder5 = value; _ = SaveAsync(); } }
+        public int  StartBorderColorR { get => _config.StartBorderColorR; set { _config.StartBorderColorR = value; _ = SaveAsync(); } }
+        public int  StartBorderColorG { get => _config.StartBorderColorG; set { _config.StartBorderColorG = value; _ = SaveAsync(); } }
+        public int  StartBorderColorB { get => _config.StartBorderColorB; set { _config.StartBorderColorB = value; _ = SaveAsync(); } }
         public bool TaskbarBlur { get => _config.TaskbarBlur; set { _config.TaskbarBlur = value; _ = SaveAsync(); } }
         public bool StartBlur   { get => _config.StartBlur;   set { _config.StartBlur   = value; _ = SaveAsync(); } }
         public bool IsFirstRun  { get => _config.IsFirstRun;  set { _config.IsFirstRun  = value; _ = SaveAsync(); } }

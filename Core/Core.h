@@ -40,6 +40,12 @@ public:
     void SetStartMenuItems(bool controlPanel, bool deviceManager, bool installedApps,
                            bool documents, bool pictures, bool videos, bool recentFiles);
 
+    // S-B: keep Start Menu visible while Dashboard preview toggle is active
+    void SetStartMenuPinned(bool pinned);
+
+    // S-E: explicit border/accent color
+    void SetStartMenuBorderColor(DWORD rgb);
+
     // Getters for status
     bool GetTaskbarFound() const { return m_taskbarFound; }
     bool GetTaskbarEnabled() const { return m_taskbarEnabled; }

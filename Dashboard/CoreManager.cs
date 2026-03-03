@@ -202,6 +202,23 @@ namespace CrystalFrame.Dashboard
             CoreNative.CoreSetStartMenuItems(controlPanel, deviceManager, installedApps, documents, pictures, videos, recentFiles);
         }
 
+        /// <summary>S-B: Pin Start Menu open for Dashboard preview</summary>
+        public void SetStartMenuPinned(bool pinned)
+        {
+            if (!_running) return;
+            Debug.WriteLine($"[CoreManager] SetStartMenuPinned({pinned})");
+            CoreNative.CoreSetStartMenuPinned(pinned);
+        }
+
+        /// <summary>S-E: Set explicit border/accent color</summary>
+        public void SetStartMenuBorderColor(int r, int g, int b)
+        {
+            if (!_running) return;
+            uint rgb = ((uint)r << 16) | ((uint)g << 8) | (uint)b;
+            Debug.WriteLine($"[CoreManager] SetStartMenuBorderColor({r},{g},{b}) = 0x{rgb:X6}");
+            CoreNative.CoreSetStartMenuBorderColor(rgb);
+        }
+
         /// <summary>
         /// Enable/disable blur/acrylic effect on taskbar
         /// </summary>

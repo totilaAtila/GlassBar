@@ -257,8 +257,47 @@
                             <CheckBox Grid.Row="3" Grid.Column="0" x:Name="StartShowRecentFiles" Content="Recent Files" FontSize="12" Checked="StartMenuItem_Changed" Unchecked="StartMenuItem_Changed"/>
                         </Grid>
                     </StackPanel>
-                </StackPanel>
 
+                    <!-- S-B: Keep Start Menu Open for preview -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Preview" FontSize="11" Foreground="#888" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Keep Start Menu Open" FontSize="13" FontWeight="SemiBold"/>
+                                <TextBlock Text="Pin menu visible to preview effects in real time" FontSize="11" Foreground="#888" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" x:Name="StartMenuPinnedToggle" OnContent="" OffContent="" Toggled="StartMenuPinned_Toggled" Margin="12,0,0,0" MinWidth="0"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- S-E: Border / Accent Color -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Border / Accent Color" FontSize="11" Foreground="#888" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="24,*,36" RowSpacing="4" ColumnSpacing="8">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="R" FontSize="11" VerticalAlignment="Center" Foreground="#E55"/>
+                            <Slider Grid.Row="0" Grid.Column="1" x:Name="StartBorderColorRSlider" Minimum="0" Maximum="255" ValueChanged="StartBorderColorR_ValueChanged"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" x:Name="StartBorderColorRValue" TextAlignment="Right" VerticalAlignment="Center" FontSize="11"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="G" FontSize="11" VerticalAlignment="Center" Foreground="#5A5"/>
+                            <Slider Grid.Row="1" Grid.Column="1" x:Name="StartBorderColorGSlider" Minimum="0" Maximum="255" ValueChanged="StartBorderColorG_ValueChanged"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" x:Name="StartBorderColorGValue" TextAlignment="Right" VerticalAlignment="Center" FontSize="11"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="B" FontSize="11" VerticalAlignment="Center" Foreground="#55E"/>
+                            <Slider Grid.Row="2" Grid.Column="1" x:Name="StartBorderColorBSlider" Minimum="0" Maximum="255" ValueChanged="StartBorderColorB_ValueChanged"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2" x:Name="StartBorderColorBValue" TextAlignment="Right" VerticalAlignment="Center" FontSize="11"/>
+                            <Border Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" x:Name="StartBorderColorPreview" Height="14" CornerRadius="3"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- S-F: Theme Presets -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Theme Presets" FontSize="11" Foreground="#888" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="PresetClassicWin7Button" Content="Classic Win7" Click="PresetClassicWin7_Click" FontSize="12" Padding="10,6"/>
+                            <Button x:Name="PresetAeroGlassButton" Content="Aero Glass" Click="PresetAeroGlass_Click" FontSize="12" Padding="10,6"/>
+                            <Button x:Name="PresetDarkButton" Content="Dark" Click="PresetDark_Click" FontSize="12" Padding="10,6"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                </StackPanel>
             </Grid>
         </Border>
     </ScrollViewer>

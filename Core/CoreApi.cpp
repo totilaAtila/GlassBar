@@ -241,6 +241,16 @@ CRYSTALFRAME_API void CoreSetStartMenuItems(bool controlPanel, bool deviceManage
     g_core->SetStartMenuItems(controlPanel, deviceManager, installedApps, documents, pictures, videos, recentFiles);
 }
 
+CRYSTALFRAME_API void CoreSetStartMenuPinned(bool pinned) {
+    if (!g_core) return;
+    g_core->SetStartMenuPinned(pinned);
+}
+
+CRYSTALFRAME_API void CoreSetStartMenuBorderColor(unsigned int rgb) {
+    if (!g_core) return;
+    g_core->SetStartMenuBorderColor(static_cast<DWORD>(rgb));
+}
+
 CRYSTALFRAME_API void CoreGetStatus(CoreStatus* status) {
     if (!g_core || !status) {
         if (status) {

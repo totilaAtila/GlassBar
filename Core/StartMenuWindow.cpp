@@ -2703,15 +2703,29 @@ void StartMenuWindow::PinItemFromAllPrograms(int apIndex) {
     InvalidateRect(m_hwnd, NULL, FALSE);
 }
 
+// AttachThreadInput trick: allows SetForegroundWindow to succeed even when our
+// window is non-activating (WS_EX_NOACTIVATE / SW_SHOWNOACTIVATE). Without
+// this, TrackPopupMenu shows the popup and immediately dismisses it.
+static void ActivateForPopup(HWND hwnd) {
+    HWND  fg    = GetForegroundWindow();
+    DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD myTid = GetCurrentThreadId();
+    if (fgTid && fgTid != myTid)
+        AttachThreadInput(fgTid, myTid, TRUE);
+    SetForegroundWindow(hwnd);
+    if (fgTid && fgTid != myTid)
+        AttachThreadInput(fgTid, myTid, FALSE);
+}
+
 void StartMenuWindow::ShowPinnedContextMenu(int pinnedIndex, POINT screenPt) {
     HMENU menu = CreatePopupMenu();
     if (!menu) return;
     AppendMenuW(menu, MF_STRING, 1, L"Unpin from Start Menu");
 
-    // SetForegroundWindow needed for TrackPopupMenu to dismiss correctly
-    SetForegroundWindow(m_hwnd);
+    ActivateForPopup(m_hwnd);
     int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
                              screenPt.x, screenPt.y, 0, m_hwnd, NULL);
+    PostMessage(m_hwnd, WM_NULL, 0, 0);
     DestroyMenu(menu);
 
     if (cmd == 1)
@@ -2722,14 +2736,32 @@ void StartMenuWindow::ShowAllProgramsContextMenu(int apIndex, POINT screenPt) {
     HMENU menu = CreatePopupMenu();
     if (!menu) return;
     AppendMenuW(menu, MF_STRING, 1, L"Pin to Start Menu");
+    AppendMenuW(menu, MF_STRING, 2, L"Pin to Taskbar");
 
-    SetForegroundWindow(m_hwnd);
+    ActivateForPopup(m_hwnd);
     int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
                              screenPt.x, screenPt.y, 0, m_hwnd, NULL);
+    PostMessage(m_hwnd, WM_NULL, 0, 0);
     DestroyMenu(menu);
 
-    if (cmd == 1)
+    if (cmd == 1) {
         PinItemFromAllPrograms(apIndex);
+    } else if (cmd == 2) {
+        const auto& nodes = CurrentApNodes();
+        if (apIndex >= 0 && apIndex < static_cast<int>(nodes.size())) {
+            const std::wstring& lnkPath = nodes[static_cast<size_t>(apIndex)].lnkPath;
+            if (!lnkPath.empty()) {
+                SHELLEXECUTEINFOW sei = {};
+                sei.cbSize = sizeof(sei);
+                sei.fMask  = SEE_MASK_FLAG_NO_UI | SEE_MASK_INVOKEIDLIST;
+                sei.hwnd   = m_hwnd;
+                sei.lpVerb = L"TaskbarPin";
+                sei.lpFile = lnkPath.c_str();
+                sei.nShow  = SW_SHOWNORMAL;
+                ShellExecuteExW(&sei);
+            }
+        }
+    }
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────

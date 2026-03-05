@@ -1,6 +1,6 @@
 
 # WORKLOG — Win7-Revival / CrystalFrame
-Last updated: 2026-03-03 (session 16 — blur fix + text quality + hover animation + avatar + border color + theme presets + keep-open toggle + submenu delay 50ms + right-column glow)
+Last updated: 2026-03-05 (session 17 — fluidity overhaul + dynamic pinned list + right-click pin/unpin)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -110,6 +110,92 @@ New requirement (non-negotiable, §10):
 2. Rebuild `CrystalFrame.Core.dll` cu CMake (pentru static CRT + crash handler activ).
 3. Test publish → verifică că `%LOCALAPPDATA%\CrystalFrame\CrystalFrame.log` apare la prima pornire.
 4. ✅ S6 implementat în această sesiune — iconițe reale din sistem (detalii în Session 9 S6 note de mai jos).
+
+---
+
+### Session 17 — Fluidity overhaul + dynamic pinned list + right-click pin/unpin (2026-03-05)
+
+**Branch:** `claude/update-worklog-MUEFZ`
+
+**Motivație:** eliminarea sacadărilor mouse cauzate de hook-uri blocate, afișare instantanee a meniului, listă pinned editabilă de utilizator.
+
+**Fișiere modificate:** `Core/Core.cpp`, `Core/StartMenuWindow.h`, `Core/StartMenuWindow.cpp`
+
+---
+
+#### Fluidity — 5 îmbunătățiri de performanță
+
+**1. PostMessage în hook callbacks (`Core.cpp:85-94`)**
+- `SetShowMenuCallback` și `SetHideMenuCallback` acum apelează `PostMessage(hwnd, WM_APP_SHOW_MENU/WM_APP_HIDE_MENU)` în loc să cheme `Show()`/`Hide()` direct.
+- Hook thread returnează în **<1μs** — zero risc de timeout `WH_MOUSE_LL` / `WH_KEYBOARD_LL` și sacadare cursor.
+- Constante noi publice: `StartMenuWindow::WM_APP_SHOW_MENU = WM_USER+103`, `WM_APP_HIDE_MENU = WM_USER+104`.
+- `HandleMessage` gestionează ambele mesaje: `WM_APP_SHOW_MENU` face toggle (dacă vizibil → Hide, altfel Show); `WM_APP_HIDE_MENU` ascunde direct.
+
+**2. Fereastră pre-creată la `Initialize()` (`StartMenuWindow.cpp:205-211`)**
+- `CreateMenuWindow()` mutat din `Show()` în `Initialize()` — fereastra există (hidden) de la pornire.
+- `Show()` nu mai face `CreateMenuWindow()`, elimină latența de creare la prima deschidere.
+
+**3. `CacheMenuPosition()` — poziție cacheată (`StartMenuWindow.cpp:2510-2551`)**
+- Metodă nouă care face `FindWindowW` + `FindWindowExW` + `GetWindowRect` + calculează `menuX/Y`.
+- Apelată la `Initialize()` și la `WM_SETTINGCHANGE` / `WM_DISPLAYCHANGE`.
+- `Show()` folosește `m_cachedMenuX/Y` direct — un singur `SetWindowPos`, fără descoperire taskbar la fiecare apăsare Win key.
+
+**4. `ApplyTransparency()` lazy (`StartMenuWindow.cpp:554-559`)**
+- Flag nou `m_transparencyApplied` — SWCA e aplicat o singură dată la prima afișare.
+- Re-aplicat automat când se schimbă blur/culoare/opacitate (settere: `SetOpacity`, `SetBackgroundColor`, `SetBlur`).
+- Elimină apelul `SetWindowCompositionAttribute` inutil la fiecare `Show()`.
+
+**5. Fade-in la `Show()` — `FADE_TIMER_ID = 3` (`StartMenuWindow.cpp:562-566`, `WM_TIMER`)**
+- La `Show()`: `SetLayeredWindowAttributes(..., 0, LWA_ALPHA)` → pornește timer 16ms.
+- Fiecare tick: `m_fadeAlpha += 51` → `SetLayeredWindowAttributes` cu noul alpha.
+- 5 ticks × 16ms ≈ **80ms** rampă 0→255 — fără "pop" brusc la deschidere.
+- La `Hide()`: timerul e oprit, alpha resetat la 255.
+- Funcționează împreună cu `WS_EX_LAYERED` existent (deja pe fereastră) și SWCA — se compun corect.
+
+---
+
+#### Dynamic pinned list
+
+**`DynamicPinnedItem` struct (`StartMenuWindow.h:85-91`)**
+- `std::wstring name, shortName, command` + `COLORREF iconColor` + `HICON hIcon`.
+- Înlocuiește `s_pinnedItems` static la runtime; `s_pinnedItems` rămâne ca sursă de default.
+
+**`m_dynamicPinnedItems` (`vector<DynamicPinnedItem>`)**
+- Populat la `Initialize()` via `LoadPinnedItems()`.
+- `m_pinnedIcons[PROG_COUNT]` array eliminat — iconele sunt acum în `DynamicPinnedItem::hIcon`.
+- `LoadIconsAsync()` iterează `m_dynamicPinnedItems` în loc de `s_pinnedItems`.
+
+**`LoadPinnedItems()` / `SavePinnedItems()` (`StartMenuWindow.cpp:2553-2620`)**
+- JSON la `%LOCALAPPDATA%\CrystalFrame\pinned_apps.json`.
+- Format: `[{"name":"…","short":"…","cmd":"…","color":DWORD}, …]`
+- Fallback automat la lista built-in (`s_pinnedItems`) dacă fișierul nu există.
+
+**Referințe actualizate** (toate pun `m_dynamicPinnedItems.size()` în loc de `PROG_COUNT`):
+- `PaintProgramsList()`: iterează `m_dynamicPinnedItems`; `recentStartY` calculat dinamic.
+- `GetProgItemAtPoint()`: zone pinned/recent calculate pe baza `pinnedCount` dinamic.
+- `ExecutePinnedItem()`: apelează `item.command` din vector.
+- Recently-used dedup (`LoadRecentPrograms()`): compară cu `m_dynamicPinnedItems`.
+- Keyboard nav (`WM_KEYDOWN`): `totalProgItems` calculat dinamic.
+- `Shutdown()`: eliberează `hIcon` din fiecare `DynamicPinnedItem`.
+
+---
+
+#### Right-click context menus
+
+**`WM_RBUTTONDOWN` handler (`StartMenuWindow.cpp:2444-2462`)**
+- Programs view: click dreapta pe indice `0..pinnedCount-1` → `ShowPinnedContextMenu(index, screenPt)`.
+- All Programs view: click dreapta pe item non-folder → `ShowAllProgramsContextMenu(apIndex, screenPt)`.
+
+**`ShowPinnedContextMenu()` → `UnpinItem()` (`StartMenuWindow.cpp:2622-2632`)**
+- `TrackPopupMenu` cu opțiunea „Unpin from Start Menu".
+- `UnpinItem(index)`: `DestroyIcon`, `erase` din vector, `SavePinnedItems()`, `InvalidateRect`.
+- Dezactivat dacă `m_iconsLoaded == false` (icons thread încă rulează).
+
+**`ShowAllProgramsContextMenu()` → `PinItemFromAllPrograms()` (`StartMenuWindow.cpp:2634-2700`)**
+- „Pin to Start Menu" apare la click dreapta pe orice aplicație din All Programs.
+- Deduplicare case-insensitivă — nu adaugă același item de două ori.
+- Refolosește `node.hIcon` cu `CopyIcon()` — fără I/O suplimentar în cazul fericit.
+- Dacă iconul lipsea: thread detached cu `SHGetFileInfoW` + `PostMessage(WM_ICONS_LOADED)`.
 
 ---
 

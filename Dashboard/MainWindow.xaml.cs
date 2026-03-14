@@ -380,17 +380,28 @@ namespace CrystalFrame.Dashboard
         // Cancels any in-flight delay for the given CTS, then waits SliderDebounceMs
         // before invoking |action|.  If the slider moves again within the window
         // the previous Task is cancelled and a fresh one is started.
-        private async void DebounceSlider(ref CancellationTokenSource cts, Action action)
+        //
+        // NOTE: C# async methods cannot have ref parameters, so the helper is
+        // synchronous — it cancels/replaces the CTS and fires an async local
+        // function (which captures the token by value, not by ref).
+        private void DebounceSlider(ref CancellationTokenSource cts, Action action)
         {
             cts.Cancel();
             cts = new CancellationTokenSource();
             var token = cts.Token;
-            try
+            var captured = action;
+
+            async Task RunDebounced()
             {
-                await Task.Delay(SliderDebounceMs, token);
-                if (!token.IsCancellationRequested) action();
+                try
+                {
+                    await Task.Delay(SliderDebounceMs, token);
+                    if (!token.IsCancellationRequested) captured();
+                }
+                catch (TaskCanceledException) { /* slider moved again — ignore */ }
             }
-            catch (TaskCanceledException) { /* slider moved again — ignore */ }
+
+            _ = RunDebounced();
         }
 
         private void TaskbarOpacity_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)

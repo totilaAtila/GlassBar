@@ -14,6 +14,7 @@
 #include <powrprof.h>
 #include <cwctype>    // towupper
 #include <wincodec.h> // S-G: WIC for PNG avatar loading
+#include <commdlg.h>  // GetOpenFileNameW for custom avatar picker
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
@@ -21,10 +22,14 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "windowscodecs.lib") // S-G: WIC
 #pragma comment(lib, "msimg32.lib")       // S-G: AlphaBlend
+#pragma comment(lib, "comdlg32.lib")      // GetOpenFileNameW
 
 namespace CrystalFrame {
 
 // ── File-scope helpers ────────────────────────────────────────────────────────
+
+// Forward declaration — defined later; needed by ShowAvatarContextMenu (line 617+).
+static void ActivateForPopup(HWND hwnd);
 
 /// S15 — Shadow text helpers.
 /// Text on transparent / blurred backgrounds looks crisp with a 1px shadow
@@ -148,10 +153,38 @@ StartMenuWindow::StartMenuWindow() {
 
     LoadCustomNames();
     LoadRecentExcluded();
+    LoadCustomAvatarPath();
 }
 
 StartMenuWindow::~StartMenuWindow() {
     Shutdown();
+}
+
+// ── Cached font lifecycle ─────────────────────────────────────────────────────
+void StartMenuWindow::CreateCachedFonts() {
+    auto MakeFont = [](int height, int weight, const wchar_t* face) -> HFONT {
+        return CreateFontW(height, 0, 0, 0, weight, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+    };
+    m_fontNormal14 = MakeFont(14, FW_NORMAL,  L"Segoe UI");
+    m_fontBold14   = MakeFont(14, FW_SEMIBOLD, L"Segoe UI");
+    m_fontNormal15 = MakeFont(15, FW_NORMAL,  L"Segoe UI");
+    m_fontBold15   = MakeFont(15, FW_SEMIBOLD, L"Segoe UI");
+    m_fontNormal13 = MakeFont(13, FW_NORMAL,  L"Segoe UI");
+    m_fontBold12   = MakeFont(12, FW_BOLD,    L"Segoe UI");
+    m_fontNormal12 = MakeFont(12, FW_NORMAL,  L"Segoe UI");
+    m_fontSmall10  = MakeFont(10, FW_NORMAL,  L"Marlett");
+    m_fontBold16   = MakeFont(16, FW_BOLD,    L"Segoe UI");
+}
+
+void StartMenuWindow::DestroyCachedFonts() {
+    auto Del = [](HFONT& f) { if (f) { DeleteObject(f); f = nullptr; } };
+    Del(m_fontNormal14);  Del(m_fontBold14);
+    Del(m_fontNormal15);  Del(m_fontBold15);
+    Del(m_fontNormal13);  Del(m_fontBold12);
+    Del(m_fontNormal12);  Del(m_fontSmall10);
+    Del(m_fontBold16);
 }
 
 // ── Initialization ───────────────────────────────────────────────────────────
@@ -211,6 +244,10 @@ bool StartMenuWindow::Initialize() {
         return false;
     }
 
+    // Pre-create all GDI font objects used by Paint methods (avoids ~15 CreateFontW
+    // calls per paint cycle which exhausts the per-process GDI handle pool).
+    CreateCachedFonts();
+
     // Cache taskbar/Start-button position so Show() is a single SetWindowPos call.
     CacheMenuPosition();
 
@@ -262,6 +299,9 @@ void StartMenuWindow::Shutdown() {
 
     // S-G — release avatar bitmap
     if (m_avatarBitmap) { DeleteObject(m_avatarBitmap); m_avatarBitmap = nullptr; }
+
+    // Release cached GDI fonts
+    DestroyCachedFonts();
 
     if (m_hwnd) {
         DestroyWindow(m_hwnd);
@@ -366,27 +406,38 @@ void StartMenuWindow::LoadAvatarAsync() {
         HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         bool comInited = SUCCEEDED(hrCom) || hrCom == RPC_E_CHANGED_MODE;
 
-        // 1. Find picture path from registry
+        // 0. Custom avatar set by user (highest priority)
         wchar_t picPath[MAX_PATH] = {};
-        HKEY hKey = nullptr;
-        LSTATUS st = RegOpenKeyExW(HKEY_CURRENT_USER,
-            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AccountPicture",
-            0, KEY_READ, &hKey);
-        if (st == ERROR_SUCCESS) {
-            DWORD type = 0, sz = sizeof(picPath);
-            // Try Image96, then Image208, then Image448
-            const wchar_t* vals[] = { L"Image96", L"Image208", L"Image448" };
-            for (const wchar_t* val : vals) {
-                sz = sizeof(picPath);
-                if (RegQueryValueExW(hKey, val, nullptr, &type,
-                                     reinterpret_cast<LPBYTE>(picPath), &sz) == ERROR_SUCCESS
-                    && type == REG_SZ && picPath[0]
-                    && picPath[0] != L'm') { // skip ms-appdata:/// URIs (Win11 MSA)
-                    break;
-                }
-                picPath[0] = L'\0';
+        if (!m_customAvatarPath.empty()) {
+            DWORD attr = GetFileAttributesW(m_customAvatarPath.c_str());
+            if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                wcsncpy_s(picPath, m_customAvatarPath.c_str(), MAX_PATH - 1);
+                CF_LOG(Info, "LoadAvatarAsync: using custom avatar");
             }
-            RegCloseKey(hKey);
+        }
+
+        // 1. Find picture path from registry
+        if (!picPath[0]) {
+            HKEY hKey = nullptr;
+            LSTATUS st = RegOpenKeyExW(HKEY_CURRENT_USER,
+                L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AccountPicture",
+                0, KEY_READ, &hKey);
+            if (st == ERROR_SUCCESS) {
+                DWORD type = 0, sz = sizeof(picPath);
+                // Try Image96, then Image208, then Image448
+                const wchar_t* vals[] = { L"Image96", L"Image208", L"Image448" };
+                for (const wchar_t* val : vals) {
+                    sz = sizeof(picPath);
+                    if (RegQueryValueExW(hKey, val, nullptr, &type,
+                                         reinterpret_cast<LPBYTE>(picPath), &sz) == ERROR_SUCCESS
+                        && type == REG_SZ && picPath[0]
+                        && picPath[0] != L'm') { // skip ms-appdata:/// URIs (Win11 MSA)
+                        break;
+                    }
+                    picPath[0] = L'\0';
+                }
+                RegCloseKey(hKey);
+            }
         }
 
         // 2. Fallback: %AppData%\Microsoft\Windows\AccountPictures\ (Win11 + MS Account)
@@ -419,6 +470,26 @@ void StartMenuWindow::LoadAvatarAsync() {
                         break;
                     }
                 }
+            }
+        }
+
+        // 4. Fallback: default Windows user avatar from system resources
+        if (!picPath[0]) {
+            wchar_t sysDir[MAX_PATH] = {};
+            if (GetEnvironmentVariableW(L"ProgramData", sysDir, MAX_PATH) > 0) {
+                std::wstring defAvatar = std::wstring(sysDir)
+                    + L"\\Microsoft\\User Account Pictures\\user.png";
+                DWORD attr = GetFileAttributesW(defAvatar.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                    wcsncpy_s(picPath, defAvatar.c_str(), MAX_PATH - 1);
+            }
+            // Also try the older "user.bmp" default
+            if (!picPath[0] && GetEnvironmentVariableW(L"ProgramData", sysDir, MAX_PATH) > 0) {
+                std::wstring defAvatar = std::wstring(sysDir)
+                    + L"\\Microsoft\\User Account Pictures\\user.bmp";
+                DWORD attr = GetFileAttributesW(defAvatar.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                    wcsncpy_s(picPath, defAvatar.c_str(), MAX_PATH - 1);
             }
         }
 
@@ -550,6 +621,140 @@ void StartMenuWindow::DrawAvatarCircle(HDC hdc, int cx, int cy, int r) {
         DrawTextW(hdc, init, 1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, oldF);
         DeleteObject(f);
+    }
+}
+
+// Hit-test: is the mouse point over the right-column avatar circle?
+bool StartMenuWindow::IsOverAvatar(POINT pt) const {
+    // Right-column avatar (large): center at (RC_X + 18 + 4, RC_HDR_H / 2), r = 18
+    int avR  = 18;
+    int avCX = RC_X + avR + 4;
+    int avCY = RC_HDR_H / 2;
+    int dx = pt.x - avCX;
+    int dy = pt.y - avCY;
+    if (dx * dx + dy * dy <= avR * avR) return true;
+
+    // Bottom-bar avatar (small): center at (MARGIN + 14, BOTTOM_BAR_Y + BOTTOM_BAR_H / 2), r = 13
+    int avR2  = 13;
+    int avCX2 = MARGIN + 14;
+    int avCY2 = BOTTOM_BAR_Y + BOTTOM_BAR_H / 2;
+    int dx2 = pt.x - avCX2;
+    int dy2 = pt.y - avCY2;
+    return dx2 * dx2 + dy2 * dy2 <= avR2 * avR2;
+}
+
+// Right-click context menu on avatar
+void StartMenuWindow::ShowAvatarContextMenu(POINT screenPt) {
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    AppendMenuW(menu, MF_STRING, 1, L"Change picture\u2026");
+    if (!m_customAvatarPath.empty())
+        AppendMenuW(menu, MF_STRING, 2, L"Reset to default");
+
+    ActivateForPopup(m_hwnd);
+    int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+                             screenPt.x, screenPt.y, 0, m_hwnd, NULL);
+    PostMessage(m_hwnd, WM_NULL, 0, 0);
+    DestroyMenu(menu);
+
+    if (cmd == 1)
+        SelectCustomAvatar();
+    else if (cmd == 2)
+        ResetAvatar();
+}
+
+// Open file picker for custom avatar image
+void StartMenuWindow::SelectCustomAvatar() {
+    wchar_t filePath[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize  = sizeof(ofn);
+    ofn.hwndOwner    = m_hwnd;
+    ofn.lpstrFilter  = L"Images (*.png;*.jpg;*.jpeg;*.bmp)\0*.png;*.jpg;*.jpeg;*.bmp\0"
+                       L"All Files (*.*)\0*.*\0";
+    ofn.lpstrFile    = filePath;
+    ofn.nMaxFile     = MAX_PATH;
+    ofn.lpstrTitle   = L"Select avatar picture";
+    ofn.Flags        = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+    if (!GetOpenFileNameW(&ofn))
+        return;  // user cancelled
+
+    // Verify the file exists
+    DWORD attr = GetFileAttributesW(filePath);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY))
+        return;
+
+    m_customAvatarPath = filePath;
+    SaveCustomAvatarPath();
+
+    // Reload avatar with the new custom path
+    if (m_avatarBitmap) { DeleteObject(m_avatarBitmap); m_avatarBitmap = nullptr; }
+    LoadAvatarAsync();
+}
+
+// Reset to auto-detected Windows avatar
+void StartMenuWindow::ResetAvatar() {
+    m_customAvatarPath.clear();
+    SaveCustomAvatarPath();
+
+    if (m_avatarBitmap) { DeleteObject(m_avatarBitmap); m_avatarBitmap = nullptr; }
+    LoadAvatarAsync();
+}
+
+// Persistence: load custom avatar path from JSON
+void StartMenuWindow::LoadCustomAvatarPath() {
+    PWSTR lap = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &lap))) return;
+    std::wstring path = std::wstring(lap) + L"\\CrystalFrame\\avatar.json";
+    CoTaskMemFree(lap);
+
+    std::wifstream f(path);
+    if (!f.is_open()) return;
+
+    std::wstring line;
+    while (std::getline(f, line)) {
+        size_t q1 = line.find(L"\"path\"");
+        if (q1 == std::wstring::npos) continue;
+        size_t c  = line.find(L':', q1);
+        size_t v1 = line.find(L'\"', c + 1);
+        size_t v2 = line.find(L'\"', v1 + 1);
+        if (v1 != std::wstring::npos && v2 != std::wstring::npos) {
+            std::wstring raw = line.substr(v1 + 1, v2 - v1 - 1);
+            // Unescape JSON backslashes
+            m_customAvatarPath.clear();
+            for (size_t i = 0; i < raw.size(); ++i) {
+                if (raw[i] == L'\\' && i + 1 < raw.size() && raw[i + 1] == L'\\') {
+                    m_customAvatarPath += L'\\';
+                    ++i;
+                } else {
+                    m_customAvatarPath += raw[i];
+                }
+            }
+        }
+    }
+}
+
+// Persistence: save custom avatar path to JSON
+void StartMenuWindow::SaveCustomAvatarPath() {
+    PWSTR lap = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &lap))) return;
+    std::wstring dir = std::wstring(lap) + L"\\CrystalFrame";
+    CoTaskMemFree(lap);
+    CreateDirectoryW(dir.c_str(), NULL);
+
+    std::wofstream f(dir + L"\\avatar.json");
+    if (!f.is_open()) return;
+
+    if (m_customAvatarPath.empty()) {
+        f << L"{ }\n";
+    } else {
+        // Escape backslashes for JSON
+        std::wstring escaped;
+        for (wchar_t ch : m_customAvatarPath) {
+            if (ch == L'\\') escaped += L"\\\\";
+            else escaped += ch;
+        }
+        f << L"{\n  \"path\": \"" << escaped << L"\"\n}\n";
     }
 }
 
@@ -1073,10 +1278,7 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
     const bool iconsReady = m_iconsLoaded.load(std::memory_order_acquire);
     SetBkMode(hdc, TRANSPARENT);
 
-    HFONT nameFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT oldF = (HFONT)SelectObject(hdc, nameFont);
+    HFONT oldF = (HFONT)SelectObject(hdc, m_fontNormal14);
 
     const int pinnedCount = static_cast<int>(m_dynamicPinnedItems.size());
     for (int i = 0; i < pinnedCount; ++i) {
@@ -1165,13 +1367,12 @@ void StartMenuWindow::PaintProgramsList(HDC hdc, const RECT& cr) {
         // Name (S15: shadow text)
         RECT nr = { MARGIN + PROG_ICON_SZ + 12, itemY,
                     DIVIDER_X - MARGIN,          itemY + PROG_ITEM_H };
-        SelectObject(hdc, nameFont);
+        SelectObject(hdc, m_fontNormal14);
         DrawShadowText(hdc, m_recentItems[i].name.c_str(), -1, &nr,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
     }
 
     SelectObject(hdc, oldF);
-    DeleteObject(nameFont);
 
     // Thin separator below pinned list (above recent items)
     int sepY = PROG_Y + pinnedCount * PROG_ITEM_H + 4;
@@ -1198,13 +1399,7 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
 
     int count = max(0, min(AP_MAX_VISIBLE, total - m_apScrollOffset));
 
-    HFONT nameFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT boldFont = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT oldF = (HFONT)SelectObject(hdc, nameFont);
+    HFONT oldF = (HFONT)SelectObject(hdc, m_fontNormal14);
 
     for (int i = 0; i < count; ++i) {
         int             nodeIdx = m_apScrollOffset + i;
@@ -1234,17 +1429,17 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
             // Real system icon from shell
             DrawIconEx(hdc, iconCX - PROG_ICON_SZ / 2, iconCY - PROG_ICON_SZ / 2,
                        node.hIcon, PROG_ICON_SZ, PROG_ICON_SZ, 0, nullptr, DI_NORMAL);
-            SelectObject(hdc, nameFont);
+            SelectObject(hdc, m_fontNormal14);
         } else if (node.isFolder) {
             // Folder fallback: amber square with "›" glyph
             DrawIconSquare(hdc, iconCX, iconCY, PROG_ICON_SZ,
                            RGB(210, 150, 20), L"\u203a");
-            SelectObject(hdc, nameFont);
+            SelectObject(hdc, m_fontNormal14);
         } else {
             // Shortcut fallback: teal square with "»" glyph
             DrawIconSquare(hdc, iconCX, iconCY, PROG_ICON_SZ,
                            RGB(30, 140, 130), L"\u00bb");
-            SelectObject(hdc, nameFont);
+            SelectObject(hdc, m_fontNormal14);
         }
 
         RECT nr = { MARGIN + PROG_ICON_SZ + 12, itemY,
@@ -1255,7 +1450,7 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
 
     // "▲ scroll…" accent when items exist above the visible window.
     if (m_apScrollOffset > 0) {
-        SelectObject(hdc, nameFont);
+        SelectObject(hdc, m_fontNormal14);
         ::SetTextColor(hdc, CalculateBorderColor());
         RECT tr = { MARGIN, PROG_Y, DIVIDER_X - MARGIN, PROG_Y + PROG_ITEM_H / 2 };
         DrawTextW(hdc, L"\u25b2  scroll\u2026", -1, &tr,
@@ -1265,7 +1460,7 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
     // "▼ more…" hint when items remain below the visible window.
     if (m_apScrollOffset + count < total) {
         int lastY = PROG_Y + count * PROG_ITEM_H;
-        SelectObject(hdc, nameFont);
+        SelectObject(hdc, m_fontNormal14);
         ::SetTextColor(hdc, CalculateBorderColor());
         RECT mr = { MARGIN, lastY, DIVIDER_X - MARGIN, AP_ROW_Y };
         DrawTextW(hdc, L"\u25bc  more\u2026", -1, &mr,
@@ -1273,8 +1468,6 @@ void StartMenuWindow::PaintAllProgramsView(HDC hdc, const RECT& cr) {
     }
 
     SelectObject(hdc, oldF);
-    DeleteObject(nameFont);
-    DeleteObject(boldFont);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1306,10 +1499,7 @@ void StartMenuWindow::PaintApRow(HDC hdc, const RECT& cr) {
         }
     }
 
-    HFONT rowFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT oldF = (HFONT)SelectObject(hdc, rowFont);
+    HFONT oldF = (HFONT)SelectObject(hdc, m_fontNormal13);
     ::SetTextColor(hdc, m_textColor);
     SetBkMode(hdc, TRANSPARENT);
 
@@ -1321,7 +1511,6 @@ void StartMenuWindow::PaintApRow(HDC hdc, const RECT& cr) {
     DrawShadowText(hdc, label, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE, m_textColor);
 
     SelectObject(hdc, oldF);
-    DeleteObject(rowFont);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1357,17 +1546,13 @@ void StartMenuWindow::PaintWin7SearchBox(HDC hdc, const RECT& cr) {
     DeleteObject(mgPen);
 
     // Placeholder text
-    HFONT ph = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT oldF = (HFONT)SelectObject(hdc, ph);
+    HFONT oldF = (HFONT)SelectObject(hdc, m_fontNormal13);
     ::SetTextColor(hdc, RGB(135, 135, 145));
     SetBkMode(hdc, TRANSPARENT);
     RECT tr = { bx1 + 34, by1, bx2 - 8, by2 };
     DrawTextW(hdc, L"Search programs and files",
               -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     SelectObject(hdc, oldF);
-    DeleteObject(ph);
 }
 
 // ── PaintWin7RightColumn ──────────────────────────────────────────────────────
@@ -1400,17 +1585,10 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
     // S-G: real avatar if loaded, otherwise initials fallback
     DrawAvatarCircle(hdc, avCX, avCY, avR);
 
-    // Dummy font for SelectObject chain (initF still needed for HFONT oldF)
-    HFONT initF = CreateFontW(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT oldF = (HFONT)SelectObject(hdc, initF);
+    HFONT oldF = (HFONT)SelectObject(hdc, m_fontBold16);
 
     // Username text (S15: shadow text)
-    HFONT nmF = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    SelectObject(hdc, nmF);
+    SelectObject(hdc, m_fontBold15);
     RECT nmR = { avCX + avR + 8, 0, cr.right - 8, RC_HDR_H };
     DrawShadowText(hdc, m_username, -1, &nmR,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
@@ -1419,10 +1597,7 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
     DrawSeparator(hdc, RC_HDR_H, DIVIDER_X + 8, cr.right - 8);
 
     // ── Shell link items ─────────────────────────────────────────────────────
-    HFONT itemF = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    SelectObject(hdc, itemF);
+    SelectObject(hdc, m_fontNormal15);
 
     // Map s_rightItems index → m_menuItems index (-1 = always visible)
     auto GetRightItemMenuIndex = [](int ri) -> int {
@@ -1493,9 +1668,6 @@ void StartMenuWindow::PaintWin7RightColumn(HDC hdc, const RECT& cr) {
     }
 
     SelectObject(hdc, oldF);
-    DeleteObject(initF);
-    DeleteObject(nmF);
-    DeleteObject(itemF);
 }
 
 // ── PaintBottomBar ────────────────────────────────────────────────────────────
@@ -1516,16 +1688,10 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
     int avCX = MARGIN + 14, avR = 13;
     DrawAvatarCircle(hdc, avCX, barCY, avR);
 
-    HFONT initF = CreateFontW(12, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT oldF = (HFONT)SelectObject(hdc, initF);
+    HFONT oldF = (HFONT)SelectObject(hdc, m_fontBold12);
 
     // ── "User" label (S15: shadow text) ──
-    HFONT nmF = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    SelectObject(hdc, nmF);
+    SelectObject(hdc, m_fontNormal13);
     RECT nmR = { avCX + avR + 6, BOTTOM_BAR_Y, DIVIDER_X - MARGIN, cr.bottom };
     DrawShadowText(hdc, m_username, -1, &nmR,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, m_textColor);
@@ -1560,15 +1726,11 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
         SelectObject(hdc, nb3);
         DeleteObject(pe);
         // Text
-        HFONT  sdF = CreateFontW(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-        HFONT  oldSdF = (HFONT)SelectObject(hdc, sdF);
+        HFONT  oldSdF = (HFONT)SelectObject(hdc, m_fontNormal12);
         ::SetTextColor(hdc, RGB(10, 10, 10));
         RECT  tr = { sdL, btnTop, sdR, btnBot };
         DrawTextW(hdc, L"Shut down", -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, oldSdF);
-        DeleteObject(sdF);
     }
 
     // Draw arrow dropdown button
@@ -1586,20 +1748,14 @@ void StartMenuWindow::PaintBottomBar(HDC hdc, const RECT& cr) {
         SelectObject(hdc, nb4);
         DeleteObject(pe);
         // Arrow glyph (▼) centred
-        HFONT  arF = CreateFontW(10, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Marlett");
-        HFONT  oldArF = (HFONT)SelectObject(hdc, arF);
+        HFONT  oldArF = (HFONT)SelectObject(hdc, m_fontSmall10);
         ::SetTextColor(hdc, RGB(10, 10, 10));
         RECT  tr = { arrL, btnTop, arrR, btnBot };
         DrawTextW(hdc, L"6", -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, oldArF);
-        DeleteObject(arF);
     }
 
     SelectObject(hdc, oldF);
-    DeleteObject(initF);
-    DeleteObject(nmF);
 }
 
 // ── Paint (master) ───────────────────────────────────────────────────────────
@@ -1997,10 +2153,7 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
     SetBkMode(hdc, TRANSPARENT);
 
     // Title — folder name
-    HFONT titleF = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT oldF = (HFONT)SelectObject(hdc, titleF);
+    HFONT oldF = (HFONT)SelectObject(hdc, m_fontBold14);
     ::SetTextColor(hdc, m_textColor);
     RECT tr = { SM_X, 0, cr.right - 4, SM_TITLE_H };
     DrawTextW(hdc, folder.name.c_str(), -1, &tr,
@@ -2008,12 +2161,6 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
     DrawSeparator(hdc, SM_TITLE_H, SM_X, cr.right - 4);
 
     // Items
-    HFONT itemF = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT boldF = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
     for (int i = 0; i < count; ++i) {
         const MenuNode& child = folder.children[static_cast<size_t>(i)];
@@ -2037,13 +2184,13 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
         if (iconsReady && child.hIcon) {
             DrawIconEx(hdc, iconCX - SM_ICON_SZ / 2, iconCY - SM_ICON_SZ / 2,
                        child.hIcon, SM_ICON_SZ, SM_ICON_SZ, 0, nullptr, DI_NORMAL);
-            SelectObject(hdc, itemF);
+            SelectObject(hdc, m_fontNormal14);
         } else if (child.isFolder) {
             DrawIconSquare(hdc, iconCX, iconCY, SM_ICON_SZ, RGB(210, 150, 20), L"\u203a");
-            SelectObject(hdc, itemF);
+            SelectObject(hdc, m_fontNormal14);
         } else {
             DrawIconSquare(hdc, iconCX, iconCY, SM_ICON_SZ, RGB(30, 140, 130), L"\u00bb");
-            SelectObject(hdc, itemF);
+            SelectObject(hdc, m_fontNormal14);
         }
 
         RECT nr = { SM_X + 32, itemY, cr.right - 4, itemY + SM_ITEM_H };
@@ -2052,7 +2199,7 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
     }
 
     if (count == 0) {
-        SelectObject(hdc, itemF);
+        SelectObject(hdc, m_fontNormal14);
         ::SetTextColor(hdc, CalculateBorderColor());
         RECT er = { SM_X, SM_TITLE_H + 8, cr.right - 4, SM_TITLE_H + SM_ITEM_H };
         DrawTextW(hdc, L"(empty)", -1, &er, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -2060,16 +2207,13 @@ void StartMenuWindow::PaintSubMenu(HDC hdc, const RECT& cr) {
 
     if (static_cast<int>(folder.children.size()) > SM_MAX_VIS) {
         int lastY = SM_TITLE_H + count * SM_ITEM_H;
-        SelectObject(hdc, itemF);
+        SelectObject(hdc, m_fontNormal14);
         ::SetTextColor(hdc, CalculateBorderColor());
         RECT mr = { SM_X, lastY, cr.right - 4, lastY + SM_ITEM_H };
         DrawTextW(hdc, L"\u25bc  more\u2026", -1, &mr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
     SelectObject(hdc, oldF);
-    DeleteObject(titleF);
-    DeleteObject(itemF);
-    DeleteObject(boldF);
 }
 
 void StartMenuWindow::ExecuteSubMenuItem(int visualIdx) {
@@ -2290,13 +2434,13 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             bool anyNewHover = (nProg >= 0 || nApRow || nAp >= 0 || nrc >= 0);
             bool hadHover    = (m_hoveredProgIndex >= 0 || m_hoveredApRow ||
                                 m_hoveredApIndex >= 0 || m_hoveredRightIndex >= 0);
-            if (anyNewHover && nProg  != m_hoveredProgIndex ||
-                               nApRow != m_hoveredApRow     ||
-                               nAp    != m_hoveredApIndex   ||
-                               nrc    != m_hoveredRightIndex) {
+            if (anyNewHover && (nProg  != m_hoveredProgIndex ||
+                                nApRow != m_hoveredApRow     ||
+                                nAp    != m_hoveredApIndex   ||
+                                nrc    != m_hoveredRightIndex)) {
                 m_hoverAnimAlpha = 0;
                 if (!m_hoverAnimTimer)
-                    m_hoverAnimTimer = SetTimer(m_hwnd, HOVER_ANIM_TIMER_ID, 10, NULL);
+                    m_hoverAnimTimer = SetTimer(m_hwnd, HOVER_ANIM_TIMER_ID, 16, NULL);
             } else if (!anyNewHover && hadHover) {
                 // Moved to a non-hoverable area — stop animation, show full
                 if (m_hoverAnimTimer) { KillTimer(m_hwnd, HOVER_ANIM_TIMER_ID); m_hoverAnimTimer = 0; }
@@ -2551,6 +2695,12 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         POINT screenPt = pt;
         ClientToScreen(m_hwnd, &screenPt);
+
+        // Right-click on avatar → context menu (Change picture / Reset)
+        if (IsOverAvatar(pt)) {
+            ShowAvatarContextMenu(screenPt);
+            return 0;
+        }
 
         if (m_viewMode == LeftViewMode::Programs) {
             int p = GetProgItemAtPoint(pt);

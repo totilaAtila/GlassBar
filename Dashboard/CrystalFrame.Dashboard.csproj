@@ -26,13 +26,17 @@
     <Content Include="..\assets\app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Copy Core DLL to output directory -->
+  <!-- Copy Core DLL to output directory (must build Core C++ project first via CMake) -->
   <ItemGroup>
     <None Include="..\Core\build\bin\Release\CrystalFrame.Core.dll"
           Link="CrystalFrame.Core.dll"
           CopyToOutputDirectory="PreserveNewest"
           Condition="Exists('..\Core\build\bin\Release\CrystalFrame.Core.dll')" />
   </ItemGroup>
+  <Target Name="WarnIfCoreDllMissing" BeforeTargets="Build">
+    <Warning Text="CrystalFrame.Core.dll not found at ..\Core\build\bin\Release\. Build the Core C++ project first (cmake --build Core/build --config Release). The Dashboard will compile but crash at runtime without it."
+             Condition="!Exists('..\Core\build\bin\Release\CrystalFrame.Core.dll')" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />

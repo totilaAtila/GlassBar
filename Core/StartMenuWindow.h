@@ -280,9 +280,24 @@ private:
     COLORREF m_borderColor         = RGB(60, 60, 65);
     bool     m_borderColorOverride = false;
 
+    // ── Cached GDI fonts (created once in Initialize, destroyed in Shutdown) ──
+    HFONT m_fontNormal14  = nullptr;   // 14pt FW_NORMAL  "Segoe UI"
+    HFONT m_fontBold14    = nullptr;   // 14pt FW_SEMIBOLD "Segoe UI"
+    HFONT m_fontNormal15  = nullptr;   // 15pt FW_NORMAL  "Segoe UI"
+    HFONT m_fontBold15    = nullptr;   // 15pt FW_SEMIBOLD "Segoe UI"
+    HFONT m_fontNormal13  = nullptr;   // 13pt FW_NORMAL  "Segoe UI"
+    HFONT m_fontBold12    = nullptr;   // 12pt FW_BOLD    "Segoe UI"
+    HFONT m_fontNormal12  = nullptr;   // 12pt FW_NORMAL  "Segoe UI"
+    HFONT m_fontSmall10   = nullptr;   // 10pt FW_NORMAL  "Marlett" (arrow glyph)
+    HFONT m_fontBold16    = nullptr;   // 16pt FW_BOLD    "Segoe UI" (right-col header)
+
+    void CreateCachedFonts();
+    void DestroyCachedFonts();
+
     // S-G — real user avatar loaded from Windows account picture
     HBITMAP     m_avatarBitmap = nullptr;   // 96×96 DIB; nullptr = use initials fallback
     std::thread m_avatarThread;             // background loader thread
+    std::wstring m_customAvatarPath;        // user-chosen custom image; empty = auto-detect
 
     // ── Layout constants (Windows 7 style) ──────────────────────────────────
     static constexpr int WIDTH  = 400;   // 450 - 50 (left panel narrowed ~7 chars)
@@ -428,6 +443,12 @@ private:
     // S-G — avatar background loading
     void LoadAvatarAsync();
     void DrawAvatarCircle(HDC hdc, int cx, int cy, int r);
+    bool IsOverAvatar(POINT pt) const;
+    void ShowAvatarContextMenu(POINT screenPt);
+    void SelectCustomAvatar();
+    void ResetAvatar();
+    void LoadCustomAvatarPath();
+    void SaveCustomAvatarPath();
 
     // Task 5 — file-system watcher for Start Menu folders
     void StartFolderWatcher();

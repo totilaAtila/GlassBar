@@ -545,7 +545,7 @@ namespace CrystalFrame.Dashboard
                     OnStartBgColorChanged(18, 18, 22);
                     OnStartTextColorChanged(200, 200, 200);
                     OnStartBorderColorChanged(60, 60, 65);
-                    OnStartOpacityChanged(90);
+                    OnStartOpacityChanged(21);
                     OnStartBlurChanged(false);
                     break;
             }

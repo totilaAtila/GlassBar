@@ -362,6 +362,10 @@ void StartMenuWindow::LoadIconsAsync() {
 //   AccountPicture → value "Image96" (96×96 JPEG/PNG path)
 void StartMenuWindow::LoadAvatarAsync() {
     m_avatarThread = std::thread([this]() {
+        // COM must be initialized on this thread before using WIC
+        HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        bool comInited = SUCCEEDED(hrCom) || hrCom == RPC_E_CHANGED_MODE;
+
         // 1. Find picture path from registry
         wchar_t picPath[MAX_PATH] = {};
         HKEY hKey = nullptr;
@@ -376,7 +380,8 @@ void StartMenuWindow::LoadAvatarAsync() {
                 sz = sizeof(picPath);
                 if (RegQueryValueExW(hKey, val, nullptr, &type,
                                      reinterpret_cast<LPBYTE>(picPath), &sz) == ERROR_SUCCESS
-                    && type == REG_SZ && picPath[0]) {
+                    && type == REG_SZ && picPath[0]
+                    && picPath[0] != L'm') { // skip ms-appdata:/// URIs (Win11 MSA)
                     break;
                 }
                 picPath[0] = L'\0';
@@ -384,7 +389,23 @@ void StartMenuWindow::LoadAvatarAsync() {
             RegCloseKey(hKey);
         }
 
-        // 2. Fallback: %ProgramData%\Microsoft\User Account Pictures\{username}.png
+        // 2. Fallback: %AppData%\Microsoft\Windows\AccountPictures\ (Win11 + MS Account)
+        if (!picPath[0]) {
+            wchar_t ap[MAX_PATH] = {};
+            if (GetEnvironmentVariableW(L"APPDATA", ap, MAX_PATH) > 0) {
+                std::wstring dir = std::wstring(ap) + L"\\Microsoft\\Windows\\AccountPictures\\";
+                WIN32_FIND_DATAW fd = {};
+                HANDLE hFind = FindFirstFileW((dir + L"*.png").c_str(), &fd);
+                if (hFind == INVALID_HANDLE_VALUE)
+                    hFind = FindFirstFileW((dir + L"*.jpg").c_str(), &fd);
+                if (hFind != INVALID_HANDLE_VALUE) {
+                    wcsncpy_s(picPath, (dir + fd.cFileName).c_str(), MAX_PATH - 1);
+                    FindClose(hFind);
+                }
+            }
+        }
+
+        // 3. Fallback: %ProgramData%\Microsoft\User Account Pictures\{username}.png
         if (!picPath[0]) {
             wchar_t pd[MAX_PATH] = {};
             if (GetEnvironmentVariableW(L"ProgramData", pd, MAX_PATH) > 0) {
@@ -399,6 +420,7 @@ void StartMenuWindow::LoadAvatarAsync() {
 
         if (!picPath[0]) {
             CF_LOG(Info, "LoadAvatarAsync: no account picture found — using initials");
+            if (comInited) CoUninitialize();
             return;
         }
 
@@ -470,6 +492,8 @@ void StartMenuWindow::LoadAvatarAsync() {
         if (pFrame)   pFrame->Release();
         if (pDecoder) pDecoder->Release();
         if (pFactory) pFactory->Release();
+
+        if (comInited) CoUninitialize();
 
         if (m_hwnd)
             PostMessage(m_hwnd, WM_AVATAR_LOADED, 0, 0);

@@ -283,6 +283,7 @@ private:
     // S-G — real user avatar loaded from Windows account picture
     HBITMAP     m_avatarBitmap = nullptr;   // 96×96 DIB; nullptr = use initials fallback
     std::thread m_avatarThread;             // background loader thread
+    std::wstring m_customAvatarPath;        // user-chosen custom image; empty = auto-detect
 
     // ── Layout constants (Windows 7 style) ──────────────────────────────────
     static constexpr int WIDTH  = 400;   // 450 - 50 (left panel narrowed ~7 chars)
@@ -428,6 +429,12 @@ private:
     // S-G — avatar background loading
     void LoadAvatarAsync();
     void DrawAvatarCircle(HDC hdc, int cx, int cy, int r);
+    bool IsOverAvatar(POINT pt) const;
+    void ShowAvatarContextMenu(POINT screenPt);
+    void SelectCustomAvatar();
+    void ResetAvatar();
+    void LoadCustomAvatarPath();
+    void SaveCustomAvatarPath();
 
     // Task 5 — file-system watcher for Start Menu folders
     void StartFolderWatcher();

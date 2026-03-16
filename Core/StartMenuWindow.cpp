@@ -14,6 +14,7 @@
 #include <powrprof.h>
 #include <cwctype>    // towupper
 #include <wincodec.h> // S-G: WIC for PNG avatar loading
+#include <commdlg.h>  // GetOpenFileNameW for custom avatar picker
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
@@ -21,6 +22,7 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "windowscodecs.lib") // S-G: WIC
 #pragma comment(lib, "msimg32.lib")       // S-G: AlphaBlend
+#pragma comment(lib, "comdlg32.lib")      // GetOpenFileNameW
 
 namespace CrystalFrame {
 
@@ -148,6 +150,7 @@ StartMenuWindow::StartMenuWindow() {
 
     LoadCustomNames();
     LoadRecentExcluded();
+    LoadCustomAvatarPath();
 }
 
 StartMenuWindow::~StartMenuWindow() {
@@ -366,27 +369,38 @@ void StartMenuWindow::LoadAvatarAsync() {
         HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         bool comInited = SUCCEEDED(hrCom) || hrCom == RPC_E_CHANGED_MODE;
 
-        // 1. Find picture path from registry
+        // 0. Custom avatar set by user (highest priority)
         wchar_t picPath[MAX_PATH] = {};
-        HKEY hKey = nullptr;
-        LSTATUS st = RegOpenKeyExW(HKEY_CURRENT_USER,
-            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AccountPicture",
-            0, KEY_READ, &hKey);
-        if (st == ERROR_SUCCESS) {
-            DWORD type = 0, sz = sizeof(picPath);
-            // Try Image96, then Image208, then Image448
-            const wchar_t* vals[] = { L"Image96", L"Image208", L"Image448" };
-            for (const wchar_t* val : vals) {
-                sz = sizeof(picPath);
-                if (RegQueryValueExW(hKey, val, nullptr, &type,
-                                     reinterpret_cast<LPBYTE>(picPath), &sz) == ERROR_SUCCESS
-                    && type == REG_SZ && picPath[0]
-                    && picPath[0] != L'm') { // skip ms-appdata:/// URIs (Win11 MSA)
-                    break;
-                }
-                picPath[0] = L'\0';
+        if (!m_customAvatarPath.empty()) {
+            DWORD attr = GetFileAttributesW(m_customAvatarPath.c_str());
+            if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                wcsncpy_s(picPath, m_customAvatarPath.c_str(), MAX_PATH - 1);
+                CF_LOG(Info, "LoadAvatarAsync: using custom avatar");
             }
-            RegCloseKey(hKey);
+        }
+
+        // 1. Find picture path from registry
+        if (!picPath[0]) {
+            HKEY hKey = nullptr;
+            LSTATUS st = RegOpenKeyExW(HKEY_CURRENT_USER,
+                L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AccountPicture",
+                0, KEY_READ, &hKey);
+            if (st == ERROR_SUCCESS) {
+                DWORD type = 0, sz = sizeof(picPath);
+                // Try Image96, then Image208, then Image448
+                const wchar_t* vals[] = { L"Image96", L"Image208", L"Image448" };
+                for (const wchar_t* val : vals) {
+                    sz = sizeof(picPath);
+                    if (RegQueryValueExW(hKey, val, nullptr, &type,
+                                         reinterpret_cast<LPBYTE>(picPath), &sz) == ERROR_SUCCESS
+                        && type == REG_SZ && picPath[0]
+                        && picPath[0] != L'm') { // skip ms-appdata:/// URIs (Win11 MSA)
+                        break;
+                    }
+                    picPath[0] = L'\0';
+                }
+                RegCloseKey(hKey);
+            }
         }
 
         // 2. Fallback: %AppData%\Microsoft\Windows\AccountPictures\ (Win11 + MS Account)
@@ -419,6 +433,26 @@ void StartMenuWindow::LoadAvatarAsync() {
                         break;
                     }
                 }
+            }
+        }
+
+        // 4. Fallback: default Windows user avatar from system resources
+        if (!picPath[0]) {
+            wchar_t sysDir[MAX_PATH] = {};
+            if (GetEnvironmentVariableW(L"ProgramData", sysDir, MAX_PATH) > 0) {
+                std::wstring defAvatar = std::wstring(sysDir)
+                    + L"\\Microsoft\\User Account Pictures\\user.png";
+                DWORD attr = GetFileAttributesW(defAvatar.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                    wcsncpy_s(picPath, defAvatar.c_str(), MAX_PATH - 1);
+            }
+            // Also try the older "user.bmp" default
+            if (!picPath[0] && GetEnvironmentVariableW(L"ProgramData", sysDir, MAX_PATH) > 0) {
+                std::wstring defAvatar = std::wstring(sysDir)
+                    + L"\\Microsoft\\User Account Pictures\\user.bmp";
+                DWORD attr = GetFileAttributesW(defAvatar.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                    wcsncpy_s(picPath, defAvatar.c_str(), MAX_PATH - 1);
             }
         }
 
@@ -550,6 +584,140 @@ void StartMenuWindow::DrawAvatarCircle(HDC hdc, int cx, int cy, int r) {
         DrawTextW(hdc, init, 1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, oldF);
         DeleteObject(f);
+    }
+}
+
+// Hit-test: is the mouse point over the right-column avatar circle?
+bool StartMenuWindow::IsOverAvatar(POINT pt) const {
+    // Right-column avatar (large): center at (RC_X + 18 + 4, RC_HDR_H / 2), r = 18
+    int avR  = 18;
+    int avCX = RC_X + avR + 4;
+    int avCY = RC_HDR_H / 2;
+    int dx = pt.x - avCX;
+    int dy = pt.y - avCY;
+    if (dx * dx + dy * dy <= avR * avR) return true;
+
+    // Bottom-bar avatar (small): center at (MARGIN + 14, BOTTOM_BAR_Y + BOTTOM_BAR_H / 2), r = 13
+    int avR2  = 13;
+    int avCX2 = MARGIN + 14;
+    int avCY2 = BOTTOM_BAR_Y + BOTTOM_BAR_H / 2;
+    int dx2 = pt.x - avCX2;
+    int dy2 = pt.y - avCY2;
+    return dx2 * dx2 + dy2 * dy2 <= avR2 * avR2;
+}
+
+// Right-click context menu on avatar
+void StartMenuWindow::ShowAvatarContextMenu(POINT screenPt) {
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    AppendMenuW(menu, MF_STRING, 1, L"Change picture\u2026");
+    if (!m_customAvatarPath.empty())
+        AppendMenuW(menu, MF_STRING, 2, L"Reset to default");
+
+    ActivateForPopup(m_hwnd);
+    int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+                             screenPt.x, screenPt.y, 0, m_hwnd, NULL);
+    PostMessage(m_hwnd, WM_NULL, 0, 0);
+    DestroyMenu(menu);
+
+    if (cmd == 1)
+        SelectCustomAvatar();
+    else if (cmd == 2)
+        ResetAvatar();
+}
+
+// Open file picker for custom avatar image
+void StartMenuWindow::SelectCustomAvatar() {
+    wchar_t filePath[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize  = sizeof(ofn);
+    ofn.hwndOwner    = m_hwnd;
+    ofn.lpstrFilter  = L"Images (*.png;*.jpg;*.jpeg;*.bmp)\0*.png;*.jpg;*.jpeg;*.bmp\0"
+                       L"All Files (*.*)\0*.*\0";
+    ofn.lpstrFile    = filePath;
+    ofn.nMaxFile     = MAX_PATH;
+    ofn.lpstrTitle   = L"Select avatar picture";
+    ofn.Flags        = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+    if (!GetOpenFileNameW(&ofn))
+        return;  // user cancelled
+
+    // Verify the file exists
+    DWORD attr = GetFileAttributesW(filePath);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY))
+        return;
+
+    m_customAvatarPath = filePath;
+    SaveCustomAvatarPath();
+
+    // Reload avatar with the new custom path
+    if (m_avatarBitmap) { DeleteObject(m_avatarBitmap); m_avatarBitmap = nullptr; }
+    LoadAvatarAsync();
+}
+
+// Reset to auto-detected Windows avatar
+void StartMenuWindow::ResetAvatar() {
+    m_customAvatarPath.clear();
+    SaveCustomAvatarPath();
+
+    if (m_avatarBitmap) { DeleteObject(m_avatarBitmap); m_avatarBitmap = nullptr; }
+    LoadAvatarAsync();
+}
+
+// Persistence: load custom avatar path from JSON
+void StartMenuWindow::LoadCustomAvatarPath() {
+    PWSTR lap = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &lap))) return;
+    std::wstring path = std::wstring(lap) + L"\\CrystalFrame\\avatar.json";
+    CoTaskMemFree(lap);
+
+    std::wifstream f(path);
+    if (!f.is_open()) return;
+
+    std::wstring line;
+    while (std::getline(f, line)) {
+        size_t q1 = line.find(L"\"path\"");
+        if (q1 == std::wstring::npos) continue;
+        size_t c  = line.find(L':', q1);
+        size_t v1 = line.find(L'\"', c + 1);
+        size_t v2 = line.find(L'\"', v1 + 1);
+        if (v1 != std::wstring::npos && v2 != std::wstring::npos) {
+            std::wstring raw = line.substr(v1 + 1, v2 - v1 - 1);
+            // Unescape JSON backslashes
+            m_customAvatarPath.clear();
+            for (size_t i = 0; i < raw.size(); ++i) {
+                if (raw[i] == L'\\' && i + 1 < raw.size() && raw[i + 1] == L'\\') {
+                    m_customAvatarPath += L'\\';
+                    ++i;
+                } else {
+                    m_customAvatarPath += raw[i];
+                }
+            }
+        }
+    }
+}
+
+// Persistence: save custom avatar path to JSON
+void StartMenuWindow::SaveCustomAvatarPath() {
+    PWSTR lap = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &lap))) return;
+    std::wstring dir = std::wstring(lap) + L"\\CrystalFrame";
+    CoTaskMemFree(lap);
+    CreateDirectoryW(dir.c_str(), NULL);
+
+    std::wofstream f(dir + L"\\avatar.json");
+    if (!f.is_open()) return;
+
+    if (m_customAvatarPath.empty()) {
+        f << L"{ }\n";
+    } else {
+        // Escape backslashes for JSON
+        std::wstring escaped;
+        for (wchar_t ch : m_customAvatarPath) {
+            if (ch == L'\\') escaped += L"\\\\";
+            else escaped += ch;
+        }
+        f << L"{\n  \"path\": \"" << escaped << L"\"\n}\n";
     }
 }
 
@@ -2551,6 +2719,12 @@ LRESULT StartMenuWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         POINT screenPt = pt;
         ClientToScreen(m_hwnd, &screenPt);
+
+        // Right-click on avatar → context menu (Change picture / Reset)
+        if (IsOverAvatar(pt)) {
+            ShowAvatarContextMenu(screenPt);
+            return 0;
+        }
 
         if (m_viewMode == LeftViewMode::Programs) {
             int p = GetProgItemAtPoint(pt);

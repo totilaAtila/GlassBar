@@ -1,4 +1,4 @@
-# Build Instructions - CrystalFrame Engine
+# Build Instructions - GlassBar Engine
 
 Detailed steps for building both Core (C++) and Dashboard (C#) components.
 

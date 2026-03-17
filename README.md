@@ -1,13 +1,13 @@
-# CrystalFrame
+# GlassBar
 
 **Windows 11 Customization Utility** — A transparent, color-customizable overlay for the Taskbar and a complete, functional revival of the Windows 7 Start Menu.
 
 ![Version](https://img.shields.io/badge/version-2.2-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Build](https://github.com/totilaAtila/Win7-Revival/actions/workflows/build.yml/badge.svg)
+![Build](https://github.com/totilaAtila/GlassBar/actions/workflows/build.yml/badge.svg)
 
-![CrystalFrame Screenshot](assets/Crystal%20Frame.png)
+![GlassBar Screenshot](assets/Crystal%20Frame.png)
 
 ---
 
@@ -220,4 +220,4 @@ MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Made for Windows 11 customization enthusiasts**
+**GlassBar — Made for Windows 11 customization enthusiasts**

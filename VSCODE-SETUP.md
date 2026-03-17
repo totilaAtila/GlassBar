@@ -1,6 +1,6 @@
-# VSCode Setup Guide pentru CrystalFrame Engine
+# VSCode Setup Guide pentru GlassBar Engine
 
-Acest ghid te va ajuta să configurezi **Visual Studio Code** pentru a lucra cu proiectul CrystalFrame Engine.
+Acest ghid te va ajuta să configurezi **Visual Studio Code** pentru a lucra cu proiectul GlassBar Engine.
 
 ---
 
@@ -338,7 +338,7 @@ După ce ai reușit să compilezi și să rulezi:
    ```cmd
    git init
    git add .
-   git commit -m "Initial commit - CrystalFrame Engine"
+   git commit -m "Initial commit - GlassBar Engine"
    ```
 
 ---

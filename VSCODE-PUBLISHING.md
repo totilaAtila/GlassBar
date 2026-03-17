@@ -206,7 +206,7 @@ Sau editează direct:
 ### **Cum fac publish prima dată:**
 
 1. **Deschide VSCode**
-   - Deschide folderul `Win7-Revival`
+   - Deschide folderul `GlassBar`
 
 2. **Ctrl+Shift+P**
    - Se deschide Command Palette (căsuța de sus)

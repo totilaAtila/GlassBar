@@ -1,5 +1,5 @@
 
-# WORKLOG — Win7-Revival / CrystalFrame
+# WORKLOG — GlassBar
 Last updated: 2026-03-17 (session 21 — CPU idle optimization, hover repaint fix, Win key combos, AeroGlass preset)
 
 ## 0) Ground truth (docs to treat as canonical)
@@ -1069,7 +1069,7 @@ Similar cu S6.1, dar pentru itemii din coloana dreaptă (Documents, Computer, et
 
 ## 9) Session prompt template (for Claude / any assistant)
 Context:
-- Repo: https://github.com/totilaAtila/Win7-Revival
+- Repo: https://github.com/totilaAtila/GlassBar
 - Taskbar is DONE. Work ONLY on Start Menu (Win7 identical).
 
 Request:

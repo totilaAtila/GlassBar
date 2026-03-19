@@ -5,7 +5,7 @@
 #include <atomic>
 #include <functional>
 
-namespace CrystalFrame {
+namespace GlassBar {
 
 // Callback interface for IPC commands
 class IIpcCallback {
@@ -64,4 +64,4 @@ private:
     bool ParseBool(const std::string& json, const std::string& key);
 };
 
-} // namespace CrystalFrame
+} // namespace GlassBar

@@ -9,7 +9,7 @@ param(
 # Clear screen for better UX
 Clear-Host
 
-Write-Host "=== CrystalFrame Publishing ===" -ForegroundColor Cyan
+Write-Host "=== GlassBar Publishing ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Prompt for version
@@ -50,7 +50,7 @@ try {
         if ($IsRelease) {
             Write-Host ""
             Write-Host "Next steps:" -ForegroundColor Yellow
-            Write-Host "1. Go to: https://github.com/totilaAtila/Win7-Revival/releases/new" -ForegroundColor White
+            Write-Host "1. Go to: https://github.com/totilaAtila/GlassBar/releases/new" -ForegroundColor White
             Write-Host "2. Create tag: v$version" -ForegroundColor White
             Write-Host "3. Upload the ZIP files from the publish folder" -ForegroundColor White
             Write-Host ""

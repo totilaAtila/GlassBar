@@ -3,7 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace CrystalFrame.Dashboard
+namespace GlassBar.Dashboard
 {
     public class Config
     {
@@ -61,7 +61,7 @@ namespace CrystalFrame.Dashboard
         public ConfigManager()
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var folder = Path.Combine(appData, "CrystalFrame");
+            var folder = Path.Combine(appData, "GlassBar");
             Directory.CreateDirectory(folder);
             _configPath = Path.Combine(folder, "config.json");
 

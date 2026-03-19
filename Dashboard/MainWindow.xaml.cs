@@ -11,7 +11,7 @@ using Windows.Graphics;
 using Windows.UI;
 using WinRT.Interop;
 
-namespace CrystalFrame.Dashboard
+namespace GlassBar.Dashboard
 {
     public sealed partial class MainWindow : Window
     {
@@ -155,7 +155,7 @@ namespace CrystalFrame.Dashboard
             var dialog = new ContentDialog
             {
                 Title           = "Core Engine Extraction Failed",
-                Content         = $"Could not extract the Core engine:\n\n{errorMessage}\n\nPlease try reinstalling CrystalFrame or check your antivirus settings.",
+                Content         = $"Could not extract the Core engine:\n\n{errorMessage}\n\nPlease try reinstalling GlassBar or check your antivirus settings.",
                 CloseButtonText = "OK",
                 XamlRoot        = this.Content.XamlRoot
             };

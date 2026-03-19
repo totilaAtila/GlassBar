@@ -4,7 +4,7 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Dashboard", "Dashboard", "{2360F3E6-04C8-649D-5938-B5231601C01C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrystalFrame.Dashboard", "Dashboard\CrystalFrame.Dashboard.csproj", "{88F97802-DC24-75F7-8BCA-A2C656381348}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlassBar.Dashboard", "Dashboard\GlassBar.Dashboard.csproj", "{88F97802-DC24-75F7-8BCA-A2C656381348}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

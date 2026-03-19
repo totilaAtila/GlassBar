@@ -1,8 +1,8 @@
 <Window
-    x:Class="CrystalFrame.Dashboard.MainWindow"
+    x:Class="GlassBar.Dashboard.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="CrystalFrame Settings">
+    Title="GlassBar Settings">
 
     <Grid x:Name="RootGrid"
           Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
@@ -46,7 +46,7 @@
                               OnContent="" OffContent=""
                               MinWidth="0" Toggled="RunAtStartup_Toggled"
                               VerticalAlignment="Center">
-                    <ToolTipService.ToolTip>Launch CrystalFrame at Windows startup</ToolTipService.ToolTip>
+                    <ToolTipService.ToolTip>Launch GlassBar at Windows startup</ToolTipService.ToolTip>
                 </ToggleSwitch>
                 <TextBlock Text="Core" FontSize="10" VerticalAlignment="Center"
                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" Margin="6,0,2,0"/>

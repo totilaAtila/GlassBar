@@ -3,10 +3,10 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CrystalFrame.Dashboard
+namespace GlassBar.Dashboard
 {
     /// <summary>
-    /// Manages CrystalFrame Core engine via direct native calls.
+    /// Manages GlassBar Core engine via direct native calls.
     /// Core runs in-process as a native DLL.
     /// </summary>
     public class CoreManager : IDisposable

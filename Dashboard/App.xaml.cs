@@ -6,7 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace CrystalFrame.Dashboard
+namespace GlassBar.Dashboard
 {
     public partial class App : Application
     {
@@ -42,16 +42,16 @@ namespace CrystalFrame.Dashboard
             InitializeComponent();
             this.UnhandledException += (sender, e) =>
             {
-                // Write to CrystalFrame.log so the exception is visible even in production.
+                // Write to GlassBar.log so the exception is visible even in production.
                 // Do NOT set e.Handled = true — let WER generate a crash dump for diagnosis.
                 try
                 {
                     var logDir = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "CrystalFrame");
+                        "GlassBar");
                     Directory.CreateDirectory(logDir);
                     File.AppendAllText(
-                        Path.Combine(logDir, "CrystalFrame.log"),
+                        Path.Combine(logDir, "GlassBar.log"),
                         $"\n[{DateTime.Now:yyyy-MM-dd HH:mm:ss}][-----][ERROR] " +
                         $"UNHANDLED UI EXCEPTION: {e.Exception}\n");
                 }
@@ -66,7 +66,7 @@ namespace CrystalFrame.Dashboard
         {
             // Single instance check
             bool createdNew;
-            _mutex = new Mutex(true, "CrystalFrame.Dashboard", out createdNew);
+            _mutex = new Mutex(true, "GlassBar.Dashboard", out createdNew);
 
             if (!createdNew)
             {

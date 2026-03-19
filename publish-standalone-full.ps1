@@ -1,4 +1,4 @@
-# CrystalFrame Complete Standalone Publisher
+# GlassBar Complete Standalone Publisher
 # Creates a fully self-contained package with ZERO dependencies
 # User doesn't need to install anything - just extract and run!
 
@@ -6,7 +6,7 @@ param(
     [string]$Version = "1.0.1"
 )
 
-Write-Host "=== CrystalFrame COMPLETE Standalone Package ===" -ForegroundColor Cyan
+Write-Host "=== GlassBar COMPLETE Standalone Package ===" -ForegroundColor Cyan
 Write-Host "Version: $Version" -ForegroundColor Green
 Write-Host "This package includes EVERYTHING - no dependencies needed!" -ForegroundColor Yellow
 Write-Host ""
@@ -55,7 +55,7 @@ Write-Host "  [OK] Core.dll built successfully" -ForegroundColor Green
 Write-Host "`n[3/6] Publishing Dashboard (self-contained with .NET runtime)..." -ForegroundColor Yellow
 
 # Set publish path (absolute)
-$publishPath = Join-Path (Get-Location) "publish\CrystalFrame-v$Version-Standalone"
+$publishPath = Join-Path (Get-Location) "publish\GlassBar-v$Version-Standalone"
 
 # Remove old publish if exists
 if (Test-Path $publishPath) {
@@ -88,7 +88,7 @@ Write-Host "  [OK] Dashboard published with .NET runtime" -ForegroundColor Green
 
 # Step 4: Copy Core.dll
 Write-Host "`n[4/6] Copying native Core.dll..." -ForegroundColor Yellow
-$coreSource = ".\Core\build\bin\Release\CrystalFrame.Core.dll"
+$coreSource = ".\Core\build\bin\Release\GlassBar.Core.dll"
 Copy-Item $coreSource -Destination $publishPath -Force
 Write-Host "  [OK] Core.dll copied" -ForegroundColor Green
 
@@ -97,7 +97,7 @@ Write-Host "`n[5/6] Creating user documentation..." -ForegroundColor Yellow
 
 @"
 =================================================================
-    CrystalFrame v$Version - STANDALONE COMPLETE PACKAGE
+    GlassBar v$Version - STANDALONE COMPLETE PACKAGE
 =================================================================
 
 🎉 ZERO DEPENDENCIES - Ready to Run!
@@ -106,7 +106,7 @@ Write-Host "`n[5/6] Creating user documentation..." -ForegroundColor Yellow
 This package includes EVERYTHING you need:
 ✅ .NET 8 Runtime (embedded)
 ✅ All Windows libraries
-✅ CrystalFrame Core engine
+✅ GlassBar Core engine
 ✅ Complete Dashboard application
 
 No installation required!
@@ -116,9 +116,9 @@ No installation required!
 ===============================
 
 1. Extract ALL files to a folder
-   Example: C:\Program Files\CrystalFrame
+   Example: C:\Program Files\GlassBar
 
-2. Run: CrystalFrame.Dashboard.exe
+2. Run: GlassBar.Dashboard.exe
 
 3. Click "Start Core" button
 
@@ -158,7 +158,7 @@ Right-Click      Edit menu items/title
 ================
 
 All settings stored in:
-%LocalAppData%\CrystalFrame\
+%LocalAppData%\GlassBar\
 
 Files:
 • config.json        - Main settings
@@ -185,8 +185,8 @@ Solution: Run as Administrator (right-click → Run as administrator)
 Total Size: ~80-90 MB (includes .NET runtime)
 
 Main Files:
-• CrystalFrame.Dashboard.exe  - Main application
-• CrystalFrame.Core.dll        - Native engine
+• GlassBar.Dashboard.exe  - Main application
+• GlassBar.Core.dll        - Native engine
 • *.dll (many)                 - .NET runtime & Windows SDK
 
 All files are required - do not delete any!
@@ -195,10 +195,10 @@ All files are required - do not delete any!
 🌐 SUPPORT & UPDATES
 ====================
 
-GitHub: https://github.com/totilaAtila/Win7-Revival
-Report Issues: https://github.com/totilaAtila/Win7-Revival/issues
+GitHub: https://github.com/totilaAtila/GlassBar
+Report Issues: https://github.com/totilaAtila/GlassBar/issues
 
-Check for updates: https://github.com/totilaAtila/Win7-Revival/releases
+Check for updates: https://github.com/totilaAtila/GlassBar/releases
 
 
 📄 LICENSE
@@ -227,10 +227,10 @@ Packaging: Complete Standalone
 QUICK START GUIDE
 =================
 
-1. Extract all files to: C:\CrystalFrame
+1. Extract all files to: C:\GlassBar
    (or any folder you prefer)
 
-2. Double-click: CrystalFrame.Dashboard.exe
+2. Double-click: GlassBar.Dashboard.exe
 
 3. Click the "Start Core" button
 
@@ -245,7 +245,7 @@ For detailed help, read README.txt
 
 # Create version file
 @"
-CrystalFrame v$Version (Standalone Complete)
+GlassBar v$Version (Standalone Complete)
 Build Date: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 Platform: Windows x64
 Package Type: Self-Contained (includes .NET runtime)
@@ -256,7 +256,7 @@ Write-Host "  [OK] Documentation created" -ForegroundColor Green
 
 # Step 6: Create ZIP archive
 Write-Host "`n[6/6] Creating ZIP archive..." -ForegroundColor Yellow
-$zipPath = ".\publish\CrystalFrame-v$Version-Standalone-COMPLETE.zip"
+$zipPath = ".\publish\GlassBar-v$Version-Standalone-COMPLETE.zip"
 if (Test-Path $zipPath) {
     Remove-Item $zipPath -Force
 }
@@ -277,14 +277,14 @@ Write-Host "  Type: Self-Contained (ZERO dependencies)" -ForegroundColor White
 Write-Host ""
 Write-Host "What's Included:" -ForegroundColor Cyan
 Write-Host "  [OK] .NET 8 Runtime (embedded)" -ForegroundColor Green
-Write-Host "  [OK] CrystalFrame Core Engine" -ForegroundColor Green
+Write-Host "  [OK] GlassBar Core Engine" -ForegroundColor Green
 Write-Host "  [OK] Complete Dashboard Application" -ForegroundColor Green
 Write-Host "  [OK] All Required Libraries" -ForegroundColor Green
 Write-Host "  [OK] User Documentation" -ForegroundColor Green
 Write-Host ""
 Write-Host "User Experience:" -ForegroundColor Cyan
 Write-Host "  - Extract ZIP" -ForegroundColor White
-Write-Host "  - Run CrystalFrame.Dashboard.exe" -ForegroundColor White
+Write-Host "  - Run GlassBar.Dashboard.exe" -ForegroundColor White
 Write-Host "  - Click Start Core" -ForegroundColor White
 Write-Host "  - Done! No installation needed!" -ForegroundColor White
 Write-Host ""

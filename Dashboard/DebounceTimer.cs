@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CrystalFrame.Dashboard
+namespace GlassBar.Dashboard
 {
     public class DebounceTimer
     {

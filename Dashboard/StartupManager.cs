@@ -2,12 +2,12 @@ using Microsoft.Win32;
 using System;
 using System.Diagnostics;
 
-namespace CrystalFrame.Dashboard
+namespace GlassBar.Dashboard
 {
     public static class StartupManager
     {
         private const string RunKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-        private const string AppName = "CrystalFrame";
+        private const string AppName = "GlassBar";
 
         public static bool IsEnabled()
         {

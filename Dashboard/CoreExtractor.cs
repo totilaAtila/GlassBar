@@ -5,16 +5,16 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 
-namespace CrystalFrame.Dashboard
+namespace GlassBar.Dashboard
 {
     /// <summary>
-    /// Extracts Core.exe from embedded resources to %LOCALAPPDATA%\CrystalFrame\.
+    /// Extracts Core.exe from embedded resources to %LOCALAPPDATA%\GlassBar\.
     /// Verifies hash to only update when version changes.
     /// </summary>
     public class CoreExtractor
     {
-        private const string CoreResourceName = "CrystalFrame.Core.exe";
-        private const string HashFileName = "CrystalFrame.Core.exe.hash";
+        private const string CoreResourceName = "GlassBar.Core.exe";
+        private const string HashFileName = "GlassBar.Core.exe.hash";
 
         private readonly string _extractionDir;
         private readonly string _coreExePath;
@@ -25,7 +25,7 @@ namespace CrystalFrame.Dashboard
         public CoreExtractor()
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            _extractionDir = Path.Combine(appData, "CrystalFrame");
+            _extractionDir = Path.Combine(appData, "GlassBar");
             _coreExePath = Path.Combine(_extractionDir, CoreResourceName);
             _hashFilePath = Path.Combine(_extractionDir, HashFileName);
         }
@@ -121,7 +121,7 @@ namespace CrystalFrame.Dashboard
         {
             try
             {
-                var processes = Process.GetProcessesByName("CrystalFrame.Core");
+                var processes = Process.GetProcessesByName("GlassBar.Core");
                 foreach (var process in processes)
                 {
                     try

@@ -28,9 +28,10 @@ bool Renderer::Initialize() {
             m_buildNumber = osvi.dwBuildNumber;
         }
     }
-    // Windows 11 24H2 = build 26100; 25H2 expected ~27xxx
+    // Windows 11 24H2 RTM = build 26100; 25H2 observed at build 26200+
+    // (Earlier guess of ~27000 was incorrect based on insider builds.)
     CF_LOG(Info, "Windows build number: " << m_buildNumber
-                 << (m_buildNumber >= 27000 ? " (25H2+ — adaptive AccentFlags enabled)"
+                 << (m_buildNumber >= 26200 ? " (25H2+ — adaptive AccentFlags enabled)"
                    : m_buildNumber >= 26100 ? " (24H2)"
                    : " (pre-24H2)"));
 
@@ -253,11 +254,11 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
         CF_LOG(Debug, "[TASKBAR] DwmSetWindowAttribute DWMWA_SYSTEMBACKDROP_TYPE=NONE attempted (build " << m_buildNumber << ")");
     }
 
-    // For Windows 24H2 taskbar (builds 26000–26999): SWCA is silently ignored on
+    // For Windows 24H2 taskbar (builds 26000–26199): SWCA is silently ignored on
     // Shell_TrayWnd. Fall back to SetLayeredWindowAttributes (alpha-only, no color/blur).
-    // NOTE: This guard is intentionally scoped to < 27000 so that 25H2+ (>= 27000)
+    // NOTE: This guard is scoped to < 26200 so that 25H2+ (builds >= 26200)
     // falls through to the SWCA path below with AccentFlags=0x20.
-    if (!isStartMenu && m_buildNumber >= 26000 && m_buildNumber < 27000) {
+    if (!isStartMenu && m_buildNumber >= 26000 && m_buildNumber < 26200) {
         LONG exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
         if (enabled && opacity > 0) {
             if (!(exStyle & WS_EX_LAYERED))
@@ -291,14 +292,13 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
         accent.GradientColor = gradientColor;
 
         // AccentFlags strategy varies by Windows build.
-        // On Windows 25H2+ (build >= 27000) the taskbar window (Shell_TrayWnd) silently
-        // ignores AccentFlags = 2. Using 0x20 (draw gradient on entire client area) or
-        // 0 (no border restriction) has better compatibility with newer builds.
+        // On Windows 25H2+ (build >= 26200) AccentFlags = 2 may be silently ignored;
+        // 0x20 (draw gradient on entire client area) has better compatibility.
         // On older builds AccentFlags = 2 is the correct value.
-        if (m_buildNumber >= 27000) {
-            // 25H2+: use 0x20 (full-window gradient, no border clipping)
+        if (m_buildNumber >= 26200) {
+            // 25H2+ (build 26200+): use 0x20 (full-window gradient, no border clipping)
             accent.AccentFlags = 0x20;
-            CF_LOG(Debug, "[" << windowType << "] Win25H2+ AccentFlags=0x20");
+            CF_LOG(Debug, "[" << windowType << "] Win25H2+ AccentFlags=0x20 (build " << m_buildNumber << ")");
         } else {
             accent.AccentFlags = 2;
         }

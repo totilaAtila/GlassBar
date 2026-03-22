@@ -298,7 +298,13 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
     ACCENT_POLICY accent = {};
 
     if (enabled && opacity > 0) {
-        if (useBlur) {
+        if (m_buildNumber >= 26200) {
+            // On 25H2+ (build 26200+) TRANSPARENTGRADIENT is silently ignored.
+            // Force ACRYLICBLURBEHIND (state 4) which uses the modern Acrylic
+            // pipeline and still honours GradientColor for a colour+alpha tint.
+            accent.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
+            CF_LOG(Debug, "[" << windowType << "] Win25H2+ forcing ACRYLICBLURBEHIND (TRANSPARENTGRADIENT ignored)");
+        } else if (useBlur) {
             // Acrylic blur (Windows 10 1803+ / Windows 11)
             accent.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
         } else {

@@ -253,21 +253,22 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
         CF_LOG(Debug, "[TASKBAR] DwmSetWindowAttribute DWMWA_SYSTEMBACKDROP_TYPE=NONE attempted (build " << m_buildNumber << ")");
     }
 
-    // For Windows 24H2+ taskbar: SWCA (both TRANSPARENTGRADIENT and ACRYLICBLURBEHIND)
-    // is silently ignored on Shell_TrayWnd in builds >= 26000. Fall back to
-    // SetLayeredWindowAttributes (alpha-only transparency, no color/blur).
-    if (!isStartMenu && m_buildNumber >= 26000) {
+    // For Windows 24H2 taskbar (builds 26000–26999): SWCA is silently ignored on
+    // Shell_TrayWnd. Fall back to SetLayeredWindowAttributes (alpha-only, no color/blur).
+    // NOTE: This guard is intentionally scoped to < 27000 so that 25H2+ (>= 27000)
+    // falls through to the SWCA path below with AccentFlags=0x20.
+    if (!isStartMenu && m_buildNumber >= 26000 && m_buildNumber < 27000) {
         LONG exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
         if (enabled && opacity > 0) {
             if (!(exStyle & WS_EX_LAYERED))
                 SetWindowLongW(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
             BYTE alpha = static_cast<BYTE>(((100 - opacity) * 255) / 100);
             SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
-            CF_LOG(Debug, "[TASKBAR] Win24H2+ LWA_ALPHA fallback: alpha=" << (int)alpha);
+            CF_LOG(Debug, "[TASKBAR] Win24H2 LWA_ALPHA fallback: alpha=" << (int)alpha);
         } else {
             if (exStyle & WS_EX_LAYERED)
                 SetWindowLongW(hwnd, GWL_EXSTYLE, exStyle & ~WS_EX_LAYERED);
-            CF_LOG(Debug, "[TASKBAR] Win24H2+ disabled");
+            CF_LOG(Debug, "[TASKBAR] Win24H2 disabled");
         }
         return;
     }

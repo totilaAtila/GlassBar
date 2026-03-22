@@ -274,6 +274,27 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
         return;
     }
 
+    // Safety net for 25H2+ (>= 26200): apply LWA_ALPHA before attempting SWCA.
+    // If SWCA is silently ignored on this build, LWA_ALPHA ensures basic alpha
+    // transparency is preserved (avoids regression to a fully opaque taskbar).
+    // If SWCA does work, both are active — the taskbar may appear slightly more
+    // transparent than configured (double-alpha), which is diagnosable and
+    // addressed in the next iteration once SWCA behaviour is confirmed.
+    if (!isStartMenu && m_buildNumber >= 26200) {
+        LONG exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        if (enabled && opacity > 0) {
+            if (!(exStyle & WS_EX_LAYERED))
+                SetWindowLongW(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+            BYTE alpha = static_cast<BYTE>(((100 - opacity) * 255) / 100);
+            SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+            CF_LOG(Debug, "[TASKBAR] Win25H2+ LWA_ALPHA safety net: alpha=" << (int)alpha);
+        } else {
+            if (exStyle & WS_EX_LAYERED)
+                SetWindowLongW(hwnd, GWL_EXSTYLE, exStyle & ~WS_EX_LAYERED);
+        }
+        // Fall through — SWCA applied below for colour overlay / blur attempt.
+    }
+
     ACCENT_POLICY accent = {};
 
     if (enabled && opacity > 0) {

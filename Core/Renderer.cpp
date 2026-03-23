@@ -29,9 +29,8 @@ bool Renderer::Initialize() {
         }
     }
     // Windows 11 24H2 RTM = build 26100; 25H2 observed at build 26200+
-    // (Earlier guess of ~27000 was incorrect based on insider builds.)
     CF_LOG(Info, "Windows build number: " << m_buildNumber
-                 << (m_buildNumber >= 26200 ? " (25H2+ -- adaptive AccentFlags enabled)"
+                 << (m_buildNumber >= 26200 ? " (25H2+ -- overlay approach, SWCA inert)"
                    : m_buildNumber >= 26100 ? " (24H2)"
                    : " (pre-24H2)"));
 
@@ -87,6 +86,14 @@ void Renderer::SetTaskbarWindow(HWND hwnd) {
 }
 
 void Renderer::SetTaskbarWindows(const std::vector<HWND>& hwnds) {
+    // Fix#3: if HWNDs unchanged, skip overlay destruction and just re-apply appearance.
+    if (hwnds == m_hwndTaskbars) {
+        for (HWND h : m_hwndTaskbars) {
+            if (h) ApplyTransparency(h, m_taskbarOpacity, m_taskbarEnabled, m_taskbarBlur);
+        }
+        CF_LOG(Info, "Taskbar windows set (unchanged): count=" << m_hwndTaskbars.size());
+        return;
+    }
     DestroyAllOverlays();
     m_hwndTaskbars = hwnds;
     for (HWND h : m_hwndTaskbars) {
@@ -259,7 +266,7 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
     // For Windows 24H2 taskbar (builds 26000–26199): SWCA is silently ignored on
     // Shell_TrayWnd. Fall back to SetLayeredWindowAttributes (alpha-only, no color/blur).
     // NOTE: This guard is scoped to < 26200 so that 25H2+ (builds >= 26200)
-    // falls through to the SWCA path below with AccentFlags=0x20.
+    // falls through to the overlay + SWCA path below.
     if (!isStartMenu && m_buildNumber >= 26000 && m_buildNumber < 26200) {
         LONG exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
         if (enabled && opacity > 0) {
@@ -312,14 +319,10 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
 
     if (enabled && opacity > 0) {
         if (m_buildNumber >= 26200 && !isStartMenu) {
-            // On 25H2+ (build 26200+) TRANSPARENTGRADIENT is silently ignored for
-            // the taskbar. Always use ACRYLICBLURBEHIND regardless of useBlur:
-            // TRANSPARENTGRADIENT returns result=1 (success) but has no visual
-            // effect, and the LWA fallback only fires on result=0 — leaving the
-            // taskbar opaque when blur is off. Known limitation: blur toggle has
-            // no effect on 25H2+ taskbar.
+            // On 25H2+ SWCA is a no-op for taskbar; ACRYLICBLURBEHIND avoids
+            // TRANSPARENTGRADIENT returning result=1 with zero visual effect.
             accent.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
-            CF_LOG(Debug, "[" << windowType << "] Win25H2+ ACRYLICBLURBEHIND (blur toggle ineffective on this build)");
+            CF_LOG(Debug, "[" << windowType << "] Win25H2+ ACRYLICBLURBEHIND (diagnostic-only, SWCA inert)");
         } else if (useBlur) {
             // Acrylic blur (Windows 10 1803+ / Windows 11)
             accent.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
@@ -334,12 +337,6 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
         DWORD gradientColor = (alpha << 24) | (b << 16) | (g << 8) | r;
         accent.GradientColor = gradientColor;
 
-        // AccentFlags strategy varies by Windows build.
-        // On Windows 25H2+ (build >= 26200) AccentFlags = 2 may be silently ignored;
-        // 0x20 (draw gradient on entire client area) has better compatibility.
-        // On older builds AccentFlags = 2 is the correct value.
-        // Iter#4 hypothesis: AccentFlags=0x20 caused SWCA to be silently ignored on 26200.
-        // Revert to AccentFlags=2 (standard value, worked on pre-25H2 builds) for all paths.
         accent.AccentFlags = 2;
         CF_LOG(Info, "[" << windowType << "] AccentFlags=2 (build " << m_buildNumber << ")");
 
@@ -360,12 +357,12 @@ void Renderer::ApplyTransparencyWithColor(HWND hwnd, int opacity, bool enabled,
     data.pvData = &accent;
     data.cbData = sizeof(accent);
 
+    SetLastError(0); // Fix#2: clear error from previous DWM calls so GetLastError reflects SWCA only
     BOOL result = m_setWindowCompositionAttribute(hwnd, &data);
     DWORD lastErr = GetLastError();
     CF_LOG(Info, "[" << windowType << "] SWCA result=" << result
                  << " HWND=0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd) << std::dec
                  << " GetLastError=" << std::dec << lastErr);
-
 }
 
 // ---------------------------------------------------------------------------

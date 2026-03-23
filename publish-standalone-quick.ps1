@@ -17,9 +17,10 @@ if (-not (Test-Path $coreSource)) {
 
 # Publish Dashboard as self-contained
 Write-Host "`nPublishing Dashboard (self-contained)..." -ForegroundColor Yellow
-Push-Location Dashboard
 
-$publishPath = Join-Path ".." "publish\GlassBar-v$Version-Standalone"
+$publishPath = Join-Path (Get-Location) "publish\GlassBar-v$Version-Standalone"
+
+Push-Location Dashboard
 
 dotnet publish `
     -c Release `

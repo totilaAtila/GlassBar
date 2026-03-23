@@ -9,7 +9,7 @@ namespace GlassBar.Dashboard
     {
         public int TaskbarOpacity { get; set; } = 75;
         public int StartOpacity { get; set; } = 50;
-        public bool TaskbarEnabled { get; set; } = false;
+        public bool TaskbarEnabled { get; set; } = true;
         public bool StartEnabled { get; set; } = false;
         public bool CoreEnabled { get; set; } = true;  // Default ON - Core runs in background after Dashboard closes
         public int TaskbarColorR { get; set; } = 0;

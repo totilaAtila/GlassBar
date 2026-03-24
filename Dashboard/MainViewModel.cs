@@ -340,6 +340,13 @@ namespace GlassBar.Dashboard
                     Debug.WriteLine("Start Menu hook ENABLED");
                 }
 
+                // Register global hotkey if configured.
+                if (_config.HotkeyVk != 0)
+                {
+                    _core.RegisterHotkey(_config.HotkeyVk, _config.HotkeyModifiers);
+                    Debug.WriteLine($"Global hotkey restored: vk=0x{_config.HotkeyVk:X2} mod=0x{_config.HotkeyModifiers:X}");
+                }
+
                 Debug.WriteLine("ViewModel initialized successfully");
                 return true;
             }
@@ -624,6 +631,37 @@ namespace GlassBar.Dashboard
 
             await Task.CompletedTask;
         }
+
+        // ── Global hotkey ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Register (or update) the global hotkey that toggles the taskbar overlay.
+        /// Persists the choice to config.json via ConfigManager.
+        /// </summary>
+        public void ApplyHotkey(int vk, int modifiers)
+        {
+            _config.HotkeyVk        = vk;
+            _config.HotkeyModifiers = modifiers;
+            _ = _config.SaveAsync();
+            _core.RegisterHotkey(vk, modifiers);
+        }
+
+        /// <summary>
+        /// Remove the global hotkey and clear the persisted setting.
+        /// </summary>
+        public void ClearHotkey()
+        {
+            _config.HotkeyVk        = 0;
+            _config.HotkeyModifiers = 0;
+            _ = _config.SaveAsync();
+            _core.UnregisterHotkey();
+        }
+
+        /// <summary>VK code loaded from config (0 = none).</summary>
+        public int LoadedHotkeyVk        => _config.HotkeyVk;
+
+        /// <summary>Modifier mask loaded from config.</summary>
+        public int LoadedHotkeyModifiers => _config.HotkeyModifiers;
 
         // INotifyPropertyChanged implementation
         public event PropertyChangedEventHandler? PropertyChanged;

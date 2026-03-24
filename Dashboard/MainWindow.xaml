@@ -109,6 +109,19 @@
                           HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Padding="10,8,10,12" Spacing="0">
 
+                    <!-- ── Update notification ──────────────────────────────── -->
+                    <InfoBar x:Name="UpdateInfoBar"
+                             IsOpen="False"
+                             Severity="Informational"
+                             Title="Update available"
+                             IsClosable="True"
+                             Margin="0,0,0,8">
+                        <InfoBar.ActionButton>
+                            <HyperlinkButton x:Name="UpdateLink" Content="View release"
+                                             Click="UpdateLink_Click"/>
+                        </InfoBar.ActionButton>
+                    </InfoBar>
+
                     <!-- ════════════════════════════════════════════════════════
                          PANEL: TASKBAR
                     ════════════════════════════════════════════════════════ -->
@@ -139,6 +152,32 @@
                                                   MinWidth="0" VerticalAlignment="Center" Margin="8,0,0,0">
                                         <ToolTipService.ToolTip>Enable/disable the Taskbar transparency overlay</ToolTipService.ToolTip>
                                     </ToggleSwitch>
+                                </Grid>
+
+                                <!-- Hotkey toggle row -->
+                                <Grid ColumnSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Spacing="1">
+                                        <TextBlock Text="Toggle hotkey" FontSize="11" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="HotkeyDisplayText" FontSize="10"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Text="None"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" x:Name="HotkeyRecordButton"
+                                            Content="Set" FontSize="11" Padding="8,4"
+                                            Click="HotkeyRecord_Click">
+                                        <ToolTipService.ToolTip>Press a key combination to use as toggle shortcut</ToolTipService.ToolTip>
+                                    </Button>
+                                    <Button Grid.Column="2" x:Name="HotkeyClearButton"
+                                            Content="Clear" FontSize="11" Padding="8,4"
+                                            Click="HotkeyClear_Click"
+                                            IsEnabled="False">
+                                        <ToolTipService.ToolTip>Remove the global hotkey</ToolTipService.ToolTip>
+                                    </Button>
                                 </Grid>
                             </StackPanel>
                         </Border>

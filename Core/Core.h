@@ -1,5 +1,6 @@
 #pragma once
 #include <Windows.h>
+#include <atomic>
 #include <memory>
 #include "ConfigManager.h"
 #include "ShellTargetLocator.h"
@@ -46,6 +47,10 @@ public:
     // S-E: explicit border/accent color
     void SetStartMenuBorderColor(DWORD rgb);
 
+    // Global hotkey toggle (thread-safe: actual RegisterHotKey done on message pump thread)
+    void RegisterHotkey(int vk, int modifiers);
+    void UnregisterHotkey();
+
     // Getters for status
     bool GetTaskbarFound() const { return m_taskbarFound; }
     bool GetTaskbarEnabled() const { return m_taskbarEnabled; }
@@ -56,6 +61,13 @@ public:
     int GetStartOpacity() const { return m_startOpacity; }
 
 private:
+    static constexpr int HOTKEY_ID = 42;   // arbitrary ID for WM_HOTKEY
+
+    // Hotkey registration is deferred to the message-pump thread via atomics.
+    std::atomic<bool> m_hotkeyPending{false};
+    std::atomic<int>  m_pendingHotkeyVk{0};
+    std::atomic<int>  m_pendingHotkeyMod{0};
+
     bool m_running = false;
     ULONGLONG m_lastRefreshTick = 0;
     ULONGLONG m_lastDetectTick  = 0;

@@ -22,6 +22,7 @@ namespace GlassBar.Dashboard
         private AppWindow _appWindow;
         private TrayIconManager? _trayIconManager;
         private bool _exitRequested = false;
+        private string? _updateUrl  = null;
 
         // ── Debounce tokens for opacity/color sliders (Task 2) ────────────────
         // Each slider group shares one CancellationTokenSource.  Moving a slider
@@ -131,6 +132,9 @@ namespace GlassBar.Dashboard
                 }
 
                 _isInitialized = true;
+
+                // Check for updates silently in the background after init.
+                _ = CheckForUpdateAsync();
             }
             catch (Exception ex)
             {
@@ -138,6 +142,29 @@ namespace GlassBar.Dashboard
                 ConnectionStatusText.Text = $"✗ Init failed: {ex.Message}";
                 _isInitialized = true;
             }
+        }
+
+        private async Task CheckForUpdateAsync()
+        {
+            try
+            {
+                var tag = await UpdateChecker.CheckForUpdateAsync();
+                if (tag == null) return;
+
+                _updateUrl = $"https://github.com/totilaAtila/GlassBar/releases/tag/{tag}";
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    UpdateInfoBar.Message = $"Version {tag} is available.";
+                    UpdateInfoBar.IsOpen  = true;
+                });
+            }
+            catch { /* never surface update errors */ }
+        }
+
+        private void UpdateLink_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+        {
+            if (_updateUrl != null)
+                Process.Start(new ProcessStartInfo(_updateUrl) { UseShellExecute = true });
         }
 
         private async Task ShowExtractionErrorDialogAsync(string errorMessage)
@@ -277,6 +304,9 @@ namespace GlassBar.Dashboard
 
                 StartMenuPinnedToggle.IsOn = _viewModel.StartMenuPinned;
 
+                // Hotkey display
+                UpdateHotkeyDisplay(_viewModel.LoadedHotkeyVk, _viewModel.LoadedHotkeyModifiers);
+
                 UpdateOpacityText();
                 UpdateTaskbarColorPreview();
                 UpdateStartBgColorPreview();
@@ -311,6 +341,131 @@ namespace GlassBar.Dashboard
                 StartStatusText.Text       = "⚠ Start menu not detected";
                 StartStatusText.Foreground = new SolidColorBrush(Colors.Orange);
             }
+        }
+
+        // ── Hotkey helpers ────────────────────────────────────────────────────────
+
+        // Win32 modifier constants (must match RegisterHotKey)
+        private const int MOD_ALT     = 0x0001;
+        private const int MOD_CONTROL = 0x0002;
+        private const int MOD_SHIFT   = 0x0004;
+        private const int MOD_WIN     = 0x0008;
+
+        private void UpdateHotkeyDisplay(int vk, int modifiers)
+        {
+            if (vk == 0)
+            {
+                HotkeyDisplayText.Text    = "None";
+                HotkeyClearButton.IsEnabled = false;
+                return;
+            }
+
+            var parts = new System.Collections.Generic.List<string>();
+            if ((modifiers & MOD_CONTROL) != 0) parts.Add("Ctrl");
+            if ((modifiers & MOD_ALT)     != 0) parts.Add("Alt");
+            if ((modifiers & MOD_SHIFT)   != 0) parts.Add("Shift");
+            if ((modifiers & MOD_WIN)     != 0) parts.Add("Win");
+            parts.Add(((Windows.System.VirtualKey)vk).ToString());
+
+            HotkeyDisplayText.Text      = string.Join("+", parts);
+            HotkeyClearButton.IsEnabled = true;
+        }
+
+        private async void HotkeyRecord_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+        {
+            var dialog = new ContentDialog
+            {
+                Title            = "Set Toggle Hotkey",
+                CloseButtonText  = "Cancel",
+                DefaultButton    = ContentDialogButton.None,
+                XamlRoot         = RootGrid.XamlRoot
+            };
+
+            var instructionText = new TextBlock
+            {
+                Text        = "Press any key combination (e.g. Ctrl+Alt+G).\nRelease modifier keys last.",
+                TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
+                Margin      = new Microsoft.UI.Xaml.Thickness(0, 0, 0, 8),
+                FontSize    = 13
+            };
+
+            var capturedText = new TextBlock
+            {
+                Text      = "Waiting for key press...",
+                FontSize  = 14,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center
+            };
+
+            // Invisible TextBox to receive keyboard focus and key events
+            var keyCapture = new Microsoft.UI.Xaml.Controls.TextBox
+            {
+                IsReadOnly = true,
+                Opacity    = 0,
+                Width      = 1,
+                Height     = 1
+            };
+
+            int capturedVk  = 0;
+            int capturedMod = 0;
+
+            keyCapture.KeyDown += (s, args) =>
+            {
+                var key = args.Key;
+                // Ignore standalone modifier presses
+                if (key == Windows.System.VirtualKey.Control ||
+                    key == Windows.System.VirtualKey.Shift    ||
+                    key == Windows.System.VirtualKey.Menu     ||
+                    key == Windows.System.VirtualKey.LeftWindows ||
+                    key == Windows.System.VirtualKey.RightWindows)
+                    return;
+
+                int mods = 0;
+                if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) mods |= MOD_CONTROL;
+                if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))    mods |= MOD_ALT;
+                if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))   mods |= MOD_SHIFT;
+                if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.LeftWindows)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down) ||
+                    Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.RightWindows)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) mods |= MOD_WIN;
+
+                capturedVk  = (int)key;
+                capturedMod = mods;
+                args.Handled = true;
+
+                var parts = new System.Collections.Generic.List<string>();
+                if ((mods & MOD_CONTROL) != 0) parts.Add("Ctrl");
+                if ((mods & MOD_ALT)     != 0) parts.Add("Alt");
+                if ((mods & MOD_SHIFT)   != 0) parts.Add("Shift");
+                if ((mods & MOD_WIN)     != 0) parts.Add("Win");
+                parts.Add(key.ToString());
+                capturedText.Text = string.Join("+", parts);
+                dialog.PrimaryButtonText = "Apply";
+            };
+
+            var panel = new StackPanel { Spacing = 4 };
+            panel.Children.Add(instructionText);
+            panel.Children.Add(capturedText);
+            panel.Children.Add(keyCapture);
+            dialog.Content = panel;
+
+            dialog.Opened += (s, args) => keyCapture.Focus(Microsoft.UI.Xaml.FocusState.Programmatic);
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary && capturedVk != 0)
+            {
+                _viewModel.ApplyHotkey(capturedVk, capturedMod);
+                UpdateHotkeyDisplay(capturedVk, capturedMod);
+            }
+        }
+
+        private void HotkeyClear_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+        {
+            _viewModel.ClearHotkey();
+            UpdateHotkeyDisplay(0, 0);
         }
 
         private void UpdateOpacityText()

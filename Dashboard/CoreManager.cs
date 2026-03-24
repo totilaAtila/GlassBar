@@ -210,6 +210,24 @@ namespace GlassBar.Dashboard
             CoreNative.CoreSetStartMenuPinned(pinned);
         }
 
+        /// <summary>Register a global hotkey that toggles the taskbar overlay.</summary>
+        /// <param name="vk">Virtual-key code (e.g. (int)'G' = 0x47). Pass 0 to disable.</param>
+        /// <param name="modifiers">MOD_CONTROL=2, MOD_ALT=1, MOD_SHIFT=4, MOD_WIN=8 (combinable).</param>
+        public void RegisterHotkey(int vk, int modifiers)
+        {
+            if (!_running) return;
+            Debug.WriteLine($"[CoreManager] RegisterHotkey(vk=0x{vk:X2}, mod=0x{modifiers:X})");
+            CoreNative.CoreRegisterHotkey(vk, modifiers);
+        }
+
+        /// <summary>Remove the global hotkey and clear it from config.</summary>
+        public void UnregisterHotkey()
+        {
+            if (!_running) return;
+            Debug.WriteLine("[CoreManager] UnregisterHotkey");
+            CoreNative.CoreUnregisterHotkey();
+        }
+
         /// <summary>S-E: Set explicit border/accent color</summary>
         public void SetStartMenuBorderColor(int r, int g, int b)
         {

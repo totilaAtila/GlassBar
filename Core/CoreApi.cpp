@@ -276,4 +276,17 @@ GLASSBAR_API bool CoreProcessMessages() {
     return g_core->ProcessMessages();
 }
 
+GLASSBAR_API void CoreRegisterHotkey(int vk, int modifiers) {
+    if (!g_core) {
+        CF_LOG(Warning, "CoreRegisterHotkey: Core not initialized");
+        return;
+    }
+    g_core->RegisterHotkey(vk, modifiers);
+}
+
+GLASSBAR_API void CoreUnregisterHotkey() {
+    if (!g_core) return;
+    g_core->UnregisterHotkey();
+}
+
 } // extern "C"

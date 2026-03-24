@@ -1,6 +1,6 @@
 
 # WORKLOG — GlassBar
-Last updated: 2026-03-20 (session 23 — Rebrand fix GlassBar, 24H2 LWA_ALPHA fallback, preset UI fixes)
+Last updated: 2026-03-24 (session 24 — Cercetare Windhawk/TranslucentTB + plan avansare proiect)
 
 ## 0) Ground truth (docs to treat as canonical)
 - Product overview + current capabilities: README.md
@@ -1466,3 +1466,73 @@ Documentația acumulase discrepanțe semnificative față de codul actual, în p
 
 **Fișiere:** `README.md`, `BUILD.md`, `Agents.md`, `TESTING.md`, `PUBLISHING.md`,
 `VSCODE-SETUP.md`, `VSCODE-PUBLISHING.md`, `docs/` (deleted)
+
+
+
+---
+
+## Session 25 — Cercetare Windhawk/TranslucentTB + Plan avansare proiect (2026-03-24)
+
+### Scopul sesiunii
+Cercetare aprofundată a tehnicilor folosite de Windhawk și TranslucentTB pentru blur real pe Windows 11 22H2+, cu scopul de a stabili direcțiile concrete de avansare ale proiectului GlassBar.
+
+### Concluzii cercetare: ce face Windhawk / TranslucentTB
+
+**Problema fundamentală pe Win11 22H2+ (build ≥ 22621):**
+- Taskbar-ul a fost rescris complet în XAML Islands (`Taskbar.View.dll` din `MicrosoftWindows.Client.Core`)
+- `SetWindowCompositionAttribute` (SWCA) cu `ACCENT_ENABLE_BLURBEHIND` și `ACCENT_ENABLE_ACRYLICBLURBEHIND` au fost **scoase** de Microsoft din taskbar-ul XAML
+- `ACCENT_ENABLE_TRANSPARENTGRADIENT` funcționează în continuare → transparență + tint ok
+- Pe build ≥ 26000 (24H2/25H2+): chiar și SWCA partial e problematic → fallback la LWA_ALPHA
+
+**Cum obțin blur real proiectele terțe (Windhawk / TranslucentTB TAP):**
+
+Ambele operează **în interiorul procesului `explorer.exe`** prin injecție DLL. Odată în proces:
+
+1. **SWCA Hook** (Windhawk `taskbar-background-helper`):
+   - Interceptează apeluri `SetWindowCompositionAttribute` din interiorul explorer
+   - Substituie valorile accent policy cu valorile dorite
+   - Simplu, dar limitat la ce poate SWCA
+
+2. **XAML Tree Manipulation** (Windhawk `windows-11-taskbar-styler` + TranslucentTB ExplorerTAP):
+   - Apelează `InitializeXamlDiagnosticsEx` (din `Windows.UI.Xaml.dll`) → injectare XAML Diagnostics API
+   - Implementează `IVisualTreeServiceCallback2::AdviseVisualTreeChange` → callback la orice schimbare în arborele XAML
+   - Filtrează după `Rectangle#BackgroundFill` în părintele `Taskbar.TaskbarFrame`
+   - Înlocuiește proprietatea `Fill` cu `AcrylicBrush` (blur nativ Fluent) sau `XamlBlurBrush` (custom via `Windows.UI.Composition`)
+
+**Mecanismul de injecție DLL:**
+```
+SetWindowsHookEx(WH_CALLWNDPROC, hookProc, hBridgeDll, explorerThreadId)
+→ Windows forțează load DLL în spațiul de adrese al explorer.exe
+→ DllMain inițializează XAML Diagnostics
+```
+
+**Arborele XAML intern relevant:**
+```
+Taskbar.TaskbarFrame
+  └── Grid#RootGrid
+       └── Taskbar.TaskbarBackground
+            ├── Rectangle#BackgroundFill    ← ținta pentru blur/culoare
+            └── Rectangle#BackgroundStroke  ← bordura
+```
+
+**COM Interface descoperit (opțional, de investigat):**
+- UUID: `5bcf9150-c28a-4ef2-913c-4c3ea2f5ead0` → `ITaskbarAppearanceService`
+- Metode: `SetTaskbarAppearance`, `SetTaskbarBlur`, `ReturnTaskbarToDefaultAppearance`, `SetTaskbarBorderVisibility`
+
+### Planul de avansare aprobat (3 faze)
+
+**Faza 1 — Documentație (risc zero):** ✅ COMPLETAT (README fix RGB 24H2/25H2+ deja aplicat în session 24)
+
+**Faza 2 — Feature-uri noi:**
+- **2.1** Global hotkey toggle: `RegisterHotKey` în Core + `WM_HOTKEY` handler + UI picker în Dashboard
+- **2.2** Auto-update checker: GitHub Releases API → InfoBar dismissabil în Dashboard
+
+**Faza 3 — Blur real (XAML Injection — TAP pattern):**
+- DLL separat `GlassBar.XamlBridge.dll` injectat în `explorer.exe`
+- `InitializeXamlDiagnosticsEx` → `IVisualTreeServiceCallback2` → find `Rectangle#BackgroundFill` → set `AcrylicBrush`
+- Fallback graceful la SWCA/LWA_ALPHA dacă injecția eșuează
+- Fișiere noi: `Core/XamlBridge/XamlBridge.cpp`, `IVisualTreeService.h`, `AcrylicBrushHelper.cpp`
+- Fișiere modificate: `Renderer.cpp` (trigger injection), `CoreApi.cpp` (export blur amount), `CMakeLists.txt`
+
+### Decizia arhitecturală
+Adoptăm XAML Injection (TAP pattern) pentru blur real, menținând arhitectura no-injection pentru toate celelalte funcționalități. Injecția este izolată în `GlassBar.XamlBridge.dll` și se face exclusiv pentru blur; nu modificăm funcționalitatea de bază a taskbar-ului.

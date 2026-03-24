@@ -80,6 +80,24 @@ bool ConfigManager::Load() {
         else if (line.find("\"startBlur\":") != std::string::npos) {
             tempConfig.startBlur = (line.find("true") != std::string::npos);
         }
+        else if (line.find("\"hotkeyVk\":") != std::string::npos) {
+            size_t pos = line.find(':');
+            if (pos != std::string::npos) {
+                std::string value = line.substr(pos + 1);
+                value.erase(std::remove(value.begin(), value.end(), ','), value.end());
+                try { tempConfig.hotkeyVk = std::stoi(value); }
+                catch (const std::exception&) {}
+            }
+        }
+        else if (line.find("\"hotkeyModifiers\":") != std::string::npos) {
+            size_t pos = line.find(':');
+            if (pos != std::string::npos) {
+                std::string value = line.substr(pos + 1);
+                value.erase(std::remove(value.begin(), value.end(), ','), value.end());
+                try { tempConfig.hotkeyModifiers = std::stoi(value); }
+                catch (const std::exception&) {}
+            }
+        }
     }
 
     file.close();
@@ -111,7 +129,9 @@ bool ConfigManager::Save() {
     file << "  \"taskbarEnabled\": " << (m_config.taskbarEnabled ? "true" : "false") << ",\n";
     file << "  \"startEnabled\": " << (m_config.startEnabled ? "true" : "false") << ",\n";
     file << "  \"taskbarBlur\": " << (m_config.taskbarBlur ? "true" : "false") << ",\n";
-    file << "  \"startBlur\": " << (m_config.startBlur ? "true" : "false") << "\n";
+    file << "  \"startBlur\": " << (m_config.startBlur ? "true" : "false") << ",\n";
+    file << "  \"hotkeyVk\": " << m_config.hotkeyVk << ",\n";
+    file << "  \"hotkeyModifiers\": " << m_config.hotkeyModifiers << "\n";
     file << "}\n";
     
     file.close();
@@ -159,6 +179,12 @@ void ConfigManager::SetTaskbarBlur(bool blur) {
 void ConfigManager::SetStartBlur(bool blur) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_config.startBlur = blur;
+}
+
+void ConfigManager::SetHotkey(int vk, int modifiers) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config.hotkeyVk        = vk;
+    m_config.hotkeyModifiers = modifiers;
 }
 
 std::wstring ConfigManager::GetConfigDirectory() {

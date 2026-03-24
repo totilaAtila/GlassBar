@@ -81,4 +81,12 @@ GLASSBAR_API void CoreGetStatus(CoreStatus* status);
 // Returns false when shutdown is requested
 GLASSBAR_API bool CoreProcessMessages();
 
+// Register a global hotkey that toggles the taskbar overlay.
+// vk: virtual-key code (e.g. 'G' = 0x47); modifiers: MOD_CONTROL | MOD_ALT etc.
+// Pass vk=0 to disable the hotkey.
+GLASSBAR_API void CoreRegisterHotkey(int vk, int modifiers);
+
+// Unregister the global hotkey and clear it from config.
+GLASSBAR_API void CoreUnregisterHotkey();
+
 } // extern "C"

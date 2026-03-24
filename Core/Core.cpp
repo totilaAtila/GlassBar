@@ -39,6 +39,13 @@ bool Core::Initialize() {
     m_taskbarBlur = config.taskbarBlur;
     m_startBlur = config.startBlur;
 
+    // Schedule hotkey registration (will be picked up on first ProcessMessages call)
+    if (config.hotkeyVk != 0) {
+        m_pendingHotkeyVk.store(config.hotkeyVk);
+        m_pendingHotkeyMod.store(config.hotkeyModifiers);
+        m_hotkeyPending.store(true);
+    }
+
     // Initialize renderer (loads SetWindowCompositionAttribute)
     if (!m_renderer->Initialize()) {
         CF_LOG(Error, "Renderer initialization failed");
@@ -132,11 +139,36 @@ bool Core::ProcessMessages() {
 
     MSG msg = {};
 
+    // Apply pending hotkey registration on this thread (RegisterHotKey is thread-affine)
+    if (m_hotkeyPending.exchange(false)) {
+        UnregisterHotKey(nullptr, HOTKEY_ID);
+        int vk  = m_pendingHotkeyVk.load();
+        int mod = m_pendingHotkeyMod.load();
+        if (vk != 0) {
+            if (!RegisterHotKey(nullptr, HOTKEY_ID, static_cast<UINT>(mod), static_cast<UINT>(vk))) {
+                CF_LOG(Warning, "RegisterHotKey failed: vk=0x" << std::hex << vk
+                                << " mod=0x" << mod << std::dec
+                                << " err=" << GetLastError());
+            } else {
+                CF_LOG(Info, "Hotkey registered: vk=0x" << std::hex << vk
+                             << " mod=0x" << mod << std::dec);
+            }
+        }
+    }
+
     // Process all available messages (non-blocking)
     while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT) {
             m_running = false;
             return false;
+        }
+        if (msg.message == WM_HOTKEY && msg.wParam == HOTKEY_ID) {
+            // Toggle taskbar overlay on/off
+            m_taskbarEnabled = !m_taskbarEnabled;
+            if (m_renderer) m_renderer->SetTaskbarEnabled(m_taskbarEnabled);
+            if (m_config)   m_config->SetTaskbarEnabled(m_taskbarEnabled);
+            CF_LOG(Info, "Hotkey: taskbar toggled " << (m_taskbarEnabled ? "ON" : "OFF"));
+            continue;
         }
         TranslateMessage(&msg);
         DispatchMessage(&msg);
@@ -380,6 +412,29 @@ void Core::SetStartMenuBorderColor(DWORD rgb) {
         m_startMenuWindow->SetBorderColor(static_cast<COLORREF>(rgb));
         CF_LOG(Info, "Start Menu border color set to 0x" << std::hex << rgb << std::dec);
     }
+}
+
+void Core::RegisterHotkey(int vk, int modifiers) {
+    m_pendingHotkeyVk.store(vk);
+    m_pendingHotkeyMod.store(modifiers);
+    m_hotkeyPending.store(true);  // picked up by ProcessMessages on pump thread
+    if (m_config) {
+        m_config->SetHotkey(vk, modifiers);
+        m_config->Save();
+    }
+    CF_LOG(Info, "Hotkey scheduled: vk=0x" << std::hex << vk
+                 << " mod=0x" << modifiers << std::dec);
+}
+
+void Core::UnregisterHotkey() {
+    m_pendingHotkeyVk.store(0);
+    m_pendingHotkeyMod.store(0);
+    m_hotkeyPending.store(true);  // vk=0 → UnregisterHotKey only
+    if (m_config) {
+        m_config->SetHotkey(0, 0);
+        m_config->Save();
+    }
+    CF_LOG(Info, "Hotkey unregistration scheduled");
 }
 
 } // namespace GlassBar

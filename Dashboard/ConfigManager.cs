@@ -50,6 +50,10 @@ namespace GlassBar.Dashboard
         // Default is false so that existing config files (upgrade scenario) are not treated
         // as first-run when the field is absent from JSON.
         public bool IsFirstRun { get; set; } = false;
+
+        // Global hotkey toggle (0 = disabled)
+        public int HotkeyVk        { get; set; } = 0;
+        public int HotkeyModifiers { get; set; } = 0;
     }
 
     public class ConfigManager
@@ -175,6 +179,8 @@ namespace GlassBar.Dashboard
         public bool TaskbarBlur { get => _config.TaskbarBlur; set { _config.TaskbarBlur = value; _ = SaveAsync(); } }
         public bool StartBlur   { get => _config.StartBlur;   set { _config.StartBlur   = value; _ = SaveAsync(); } }
         public bool IsFirstRun  { get => _config.IsFirstRun;  set { _config.IsFirstRun  = value; _ = SaveAsync(); } }
+        public int  HotkeyVk        { get => _config.HotkeyVk;        set { _config.HotkeyVk        = value; _ = SaveAsync(); } }
+        public int  HotkeyModifiers { get => _config.HotkeyModifiers; set { _config.HotkeyModifiers = value; _ = SaveAsync(); } }
 
         public async Task LoadAsync()
         {

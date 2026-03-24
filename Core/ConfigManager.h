@@ -13,6 +13,8 @@ struct Config {
     bool startEnabled = true;
     bool taskbarBlur = false;
     bool startBlur = false;
+    int hotkeyVk        = 0;      // 0 = disabled; virtual-key code (e.g. 'G' = 0x47)
+    int hotkeyModifiers = 0;      // MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN
 };
 
 class ConfigManager {
@@ -34,6 +36,7 @@ public:
     void SetStartEnabled(bool enabled);
     void SetTaskbarBlur(bool blur);
     void SetStartBlur(bool blur);
+    void SetHotkey(int vk, int modifiers);
     
 private:
     std::wstring m_configPath;
